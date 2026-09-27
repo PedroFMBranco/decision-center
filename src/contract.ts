@@ -107,6 +107,36 @@ export interface ReplyRequest {
     | { type: 'permission'; allow: boolean; note?: string }
 }
 
+/**
+ * A reply that didn't go through, kept on this Mac only (plugin storage, the
+ * latest 50). `GET /api/failures` lists them newest first; `POST
+ * /api/failures/clear` empties the list.
+ */
+export interface ReplyFailure {
+  /** Unique per failure. */
+  id: string
+  at: number
+  itemId: string
+  agent: AgentType | null
+  kind: FeedKind | null
+  /** `worktree / title` of the item, when it was still in the feed. */
+  where: string | null
+  reply: ReplyRequest['reply']
+  code: ApiErrorCode
+  message: string
+  /** Keys typed into the pane before it failed, escaped. Empty: the pane wasn't touched. */
+  keysSent: string[]
+  /** The bottom of the last pane screen the sender read, or null if it read none. */
+  screen: string[] | null
+  /** Unsent text in the pane's composer at that moment, which the screen lines don't show. */
+  draft: string | null
+}
+
+export interface FailuresResponse {
+  ok: true
+  failures: ReplyFailure[]
+}
+
 /** `POST /api/read` marks an item read. */
 export interface ReadRequest {
   id: string

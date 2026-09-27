@@ -3,7 +3,7 @@
   "id": "decision-center",
   "publisher": "coldfox",
   "name": "Decision Center",
-  "version": "0.2.1",
+  "version": "0.2.3",
   "description": "A feed of Claude Code and Codex sessions that finished, need permission, or asked a question. Reply without switching panes.",
   "author": {
     "name": "coldfox",

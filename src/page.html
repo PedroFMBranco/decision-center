@@ -298,6 +298,22 @@ header.top { display: flex; align-items: center; gap: 16px; padding: 14px 20px; 
 .pfoot { display: flex; gap: 14px; padding: 10px 16px; border-top: 1px solid var(--edge); font: 11px var(--mono); color: var(--ink-3); }
 .help dl { display: grid; grid-template-columns: auto 1fr; gap: 8px 18px; margin: 0; padding: 18px 22px 12px; font-size: 13px; }
 .help h2 { font: 700 18px var(--display); margin: 0; padding: 18px 22px 0; }
+/* failed replies */
+#failBtn { color: var(--p); border-color: color-mix(in srgb, var(--p) 45%, transparent); }
+#failBtn[hidden] { display: none; }
+.fails .sheet { width: min(760px, 94vw); }
+.flist { max-height: 60vh; overflow-y: auto; padding: 8px 22px 4px; }
+.fail { border: 1px solid var(--edge); border-radius: 14px; padding: 10px 14px; margin-bottom: 10px; }
+.fail summary { cursor: pointer; font-size: 13px; line-height: 1.5; }
+.fail summary small { font: 11px var(--mono); color: var(--ink-3); }
+.fail .why { display: block; color: var(--ink-2); }
+.fail .why b { font: 600 11px var(--mono); color: var(--p); margin-right: 6px; }
+.fail dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 10px 0 0; font-size: 12.5px; }
+.fail dt { color: var(--ink-3); }
+.fail dd { margin: 0; min-width: 0; }
+.fail pre { margin: 0; font: 11px/1.45 var(--mono); white-space: pre; overflow-x: auto; padding: 10px 12px; border-radius: 10px; background: rgba(0,0,0,.35); }
+:root[data-theme="light"] .fail pre { background: #1a1b20; color: #eef0f4; }
+.fempty { padding: 26px 0; color: var(--ink-3); font-size: 13px; }
 .help dt { text-align: right; }
 .help .prefs { display: flex; gap: 8px; flex-wrap: wrap; padding: 4px 22px 20px; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
@@ -319,6 +335,7 @@ header.top { display: flex; align-items: center; gap: 16px; padding: 14px 20px; 
     <span class="spacer"></span>
     <span class="conn" id="conn" role="status"><i></i><span>Connecting</span></span>
     <button class="pillbtn" id="paletteBtn" title="Jump to a session">Jump to <kbd>⌘K</kbd></button>
+    <button class="pillbtn" id="failBtn" title="Replies that didn't go through" hidden>Failed <b id="failCount">0</b></button>
     <button class="pillbtn" id="nextBtn" title="Next unread item">Next <kbd>n</kbd></button>
     <button class="pillbtn" id="helpBtn" title="Keyboard shortcuts and settings"><kbd>?</kbd></button>
   </header>
@@ -338,6 +355,11 @@ header.top { display: flex; align-items: center; gap: 16px; padding: 14px 20px; 
   <div class="pfoot"><span><kbd>↑</kbd> <kbd>↓</kbd> move</span><span><kbd>Enter</kbd> open</span><span><kbd>Esc</kbd> close</span></div>
 </div></div>
 
+<div class="overlay help fails" id="fails"><div class="sheet">
+  <h2>Failed replies</h2>
+  <div class="flist" id="flist"></div>
+  <div class="prefs"><button class="pillbtn" id="failCopy">Copy report</button><button class="pillbtn" id="failClear">Clear</button><span class="src">Kept on this Mac only: the last 50, with the keys typed and the pane's screen.</span></div>
+</div></div>
 <div class="overlay help" id="help"><div class="sheet">
   <h2>Keyboard</h2>
   <dl>
@@ -354,6 +376,7 @@ header.top { display: flex; align-items: center; gap: 16px; padding: 14px 20px; 
     <dt><kbd>x</kbd></dt><dd>Dismiss this item</dd>
     <dt><kbd>Shift</kbd>+<kbd>X</kbd></dt><dd>Dismiss all finished</dd>
     <dt><kbd>o</kbd></dt><dd>Open the pane in Orca</dd>
+    <dt><kbd>!</kbd></dt><dd>Failed replies: what was sent, the keys typed, and the pane's screen</dd>
   </dl>
   <div class="prefs"><button class="pillbtn" id="themeBtn"></button><button class="pillbtn" id="densityBtn"></button></div>
 </div></div>
@@ -618,7 +641,7 @@ function renderDetail() {
 
 function errorRow(i) {
   const e = errors[i.id]; if (!e) return "";
-  return `<div class="err" role="alert"><b>Not sent.</b><span>${esc(e.message)}</span>${i.kind !== "closed" ? `<button class="pillbtn" data-act="open">Open pane <kbd>o</kbd></button>` : ""}</div>`;
+  return `<div class="err" role="alert"><b>Not sent.</b><span>${esc(e.message)}</span><button class="pillbtn" data-act="fail-details">Details <kbd>!</kbd></button>${i.kind !== "closed" ? `<button class="pillbtn" data-act="open">Open pane <kbd>o</kbd></button>` : ""}</div>`;
 }
 function dockHtml(i) {
   const k = stateKey(i);
@@ -734,6 +757,7 @@ async function deliver(c) {
     toast(`Sent to ${i.agent} · ${short(i)}.`);
   } else {
     errors[i.id] = { since: i.since, message: r.error.message };
+    noteFailure(i, c.reply, r.error);
     if (!drafts[i.id]) drafts[i.id] = c.draft;
     if (selId !== i.id) toast(`Not sent to ${short(i)}: ${r.error.message}`, true);
   }
@@ -814,6 +838,64 @@ function sendText(i) {
   const text = (drafts[i.id] || "").trim(); if (!text) return;
   send(i, `“${text.length > 40 ? text.slice(0, 40) + "…" : text}”`, { type: "text", text });
 }
+// ---------------------------------------------------------------- failed replies (kept by the worker; offline ones only here)
+let replyFailures = [];
+const localFailures = []; // the server was unreachable, so it never saw these
+let failOpenId = null;    // the failure shown expanded
+const allFailures = () => [...localFailures, ...replyFailures].sort((a, b) => b.at - a.at);
+async function loadFailures() {
+  try {
+    const r = await (await fetch("/api/failures")).json();
+    if (r.ok) replyFailures = r.failures;
+  } catch {}
+  renderFailures();
+}
+function noteFailure(i, reply, error) {
+  if (error.code !== "offline" && error.code !== "bad_response") return loadFailures();
+  localFailures.unshift({ id: "local-" + Date.now(), at: Date.now(), itemId: i.id, agent: i.agent, kind: i.kind, where: i.worktreeName + " / " + i.title, reply, code: error.code, message: error.message, keysSent: [], screen: null, draft: null });
+  renderFailures();
+}
+function replySummary(r) {
+  if (r.type === "text") return `“${r.text}”`;
+  if (r.type === "option") return "option " + r.indexes.join(" + ");
+  if (r.type === "answers") return "answers " + r.answers.map(a => a.join(" + ")).join(" · ");
+  return (r.allow ? "Allow" : "Deny") + (r.note ? ` + note “${r.note}”` : "");
+}
+function renderFailures() {
+  const list = allFailures();
+  $("#failBtn").hidden = !list.length;
+  $("#failCount").textContent = list.length;
+  if (!$("#fails").classList.contains("on")) return;
+  $("#flist").innerHTML = list.length ? list.map(f => `<details class="fail" ${f.id === failOpenId ? "open" : ""}>
+      <summary><b>${esc(f.where || f.itemId)}</b> <small>${esc(f.agent || "?")} · ${esc(f.kind || "gone")} · ${ago(f.at) === "now" ? "just now" : ago(f.at) + " ago"}</small>
+        <span class="why"><b>${esc(f.code)}</b>${esc(f.message)}</span></summary>
+      <dl><dt>Sent</dt><dd>${esc(replySummary(f.reply))}</dd>
+        <dt>Keys typed</dt><dd>${f.keysSent.length ? esc(f.keysSent.join(", ")) : "none: the pane wasn't touched"}</dd>
+        ${f.draft ? `<dt>Unsent in pane</dt><dd>“${esc(f.draft)}”</dd>` : ""}
+        <dt>Screen</dt><dd>${f.screen ? `<pre>${esc(f.screen.join("\n"))}</pre>` : f.code === "offline" ? "none: Decision Center wasn't running" : "none: the pane wasn't read"}</dd></dl>
+    </details>`).join("") : `<div class="fempty">No failed replies.</div>`;
+}
+function openFailures(itemId) {
+  failOpenId = (itemId && allFailures().find(x => x.itemId === itemId)?.id) || null;
+  $("#fails").classList.add("on");
+  renderFailures();
+  loadFailures();
+}
+async function copyFailures() {
+  const report = JSON.stringify({ app: "Decision Center", copiedAt: new Date().toISOString(), userAgent: navigator.userAgent, failures: allFailures() }, null, 2);
+  try { await navigator.clipboard.writeText(report); toast("Copied the failure report."); }
+  catch { toast("Couldn't reach the clipboard.", true); }
+}
+async function clearFailures() {
+  const r = await post("/api/failures/clear", {});
+  if (!r.ok) return toast("Couldn't clear: " + r.error.message, true);
+  localFailures.length = 0; replyFailures = [];
+  renderFailures();
+}
+$("#failBtn").onclick = () => openFailures();
+$("#failCopy").onclick = copyFailures;
+$("#failClear").onclick = clearFailures;
+
 function toast(m, bad) {
   const box = $("#toasts"), t = document.createElement("div");
   t.className = "toast" + (bad ? " bad" : ""); t.textContent = m; box.appendChild(t);
@@ -889,6 +971,7 @@ document.addEventListener("click", e => {
     case "send": return sendText(i);
     case "go-next": return finish();
     case "stay": return cancelCountdown();
+    case "fail-details": return openFailures(i?.id);
     case "back": selId = null; return render();
   }
 });
@@ -897,7 +980,7 @@ document.addEventListener("keydown", e => {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); return $("#palette").classList.contains("on") ? closePalette() : openPalette(); }
   if (e.target.id === "pq") { if (e.key === "Escape") closePalette(); return; }
   const inBox = e.target.matches("textarea, select, input");
-  if (e.key === "Escape") { if ($("#help").classList.contains("on")) return $("#help").classList.remove("on"); if (advancing) return cancelCountdown(); if (inBox) return e.target.blur(); }
+  if (e.key === "Escape") { if ($("#fails").classList.contains("on")) return $("#fails").classList.remove("on"); if ($("#help").classList.contains("on")) return $("#help").classList.remove("on"); if (advancing) return cancelCountdown(); if (inBox) return e.target.blur(); }
   if (inBox) { if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.target.matches("#detail textarea")) { e.preventDefault(); sendText(sel()); } return; }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   const i = sel();
@@ -906,6 +989,7 @@ document.addEventListener("keydown", e => {
     case "k": case "ArrowUp": e.preventDefault(); return move(-1);
     case "n": return nextWaiting();
     case "?": return $("#help").classList.toggle("on");
+    case "!": return $("#fails").classList.contains("on") ? $("#fails").classList.remove("on") : openFailures(sel()?.id);
     case "X": return dismissFinished();
     case "u": return cancelCountdown();
   }
@@ -942,6 +1026,7 @@ document.fonts?.ready.then(moveSegPill);
 setInterval(() => document.querySelectorAll(".card[data-id] .when").forEach(el => { const it = items.find(x => x.id === el.closest(".card").dataset.id); if (it) el.textContent = ago(it.since); }), 30e3);
 render();
 connect();
+loadFailures();
 </script>
 </body>
 </html>

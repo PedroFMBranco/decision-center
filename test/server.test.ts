@@ -28,6 +28,8 @@ before(async () => {
       dismissals.push(body)
       return { ok: true }
     },
+    failures: async () => ({ ok: true, failures: [] }),
+    clearFailures: async () => ({ ok: true }),
     suggest: async ({ id }) =>
       id === 'known' ? { ok: true, proposals: ['Ship it'] } : { ok: false, error: { code: 'not_found', message: 'no' } },
     health: () => ({ pid: 1, startedAt: 0, lastHeartbeatAt: null }),
@@ -96,6 +98,12 @@ test('accepts permission and several-answer replies, and rejects malformed ones'
   assert.equal((await post({ type: 'permission', allow: 'yes' })).status, 400)
   assert.equal((await post({ type: 'answers', answers: [[2], []] })).status, 400)
   assert.equal((await post({ type: 'shell', command: 'ls' })).status, 400)
+})
+
+test('lists failed replies and clears them', async () => {
+  const list = await call('GET', '/api/failures', {}, undefined)
+  assert.equal(list.status, 200)
+  assert.equal((await call('POST', '/api/failures/clear', json, '{}')).status, 200)
 })
 
 test('marks an item read, and 404s an unknown one', async () => {

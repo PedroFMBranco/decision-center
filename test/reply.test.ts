@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import type { FeedItem, FeedQuestion, ReplyRequest } from '../src/contract.ts'
+import type { FeedItem, FeedQuestion, ReplyFailure, ReplyRequest } from '../src/contract.ts'
 import { OrcaCliError } from '../src/cli.ts'
-import { claudeQuestionCount, pickerRows, ReplySender } from '../src/reply.ts'
+import { claudeQuestionCount, describeKey, pickerRows, ReplySender } from '../src/reply.ts'
 
 // Screens captured from real panes with `orca terminal read --screen`
 // (Claude Code 2.1.283, Codex 0.155.1).
@@ -91,7 +91,7 @@ function item(overrides: Partial<FeedItem>): FeedItem {
 }
 
 /** A sender over a fake pane: `screens` are shown in turn, the last one sticks. */
-function harness(screens: string[][], options: { draft?: string; failFirstSend?: string } = {}) {
+function harness(screens: string[][], options: { draft?: string; failFirstSend?: string; onFailure?: (failure: ReplyFailure) => void } = {}) {
   const sent: string[] = []
   let shown = 0
   let failNext = options.failFirstSend
@@ -106,7 +106,9 @@ function harness(screens: string[][], options: { draft?: string; failFirstSend?:
       }
       sent.push(`${JSON.stringify(input.text ?? '')}${input.enter ? '+enter' : ''}`)
     },
-    sleep: async () => undefined
+    sleep: async () => undefined,
+    onFailure: options.onFailure,
+    now: () => 1000
   })
   return { sender, sent }
 }
@@ -397,4 +399,64 @@ test('several questions refuse a single pick, a missing answer, and a part that 
   assert.equal(code(result), 'terminal_rejected')
   assert.match((result as { error: { message: string } }).error.message, /answered 1 of 2/)
   assert.deepEqual([...single.sent, ...short.sent, ...stuck.sent], ['"2"'])
+})
+
+test('a failed reply is recorded with the keys already typed and the screen the sender saw', async () => {
+  const failures: ReplyFailure[] = []
+  const { sender } = harness([COLOUR], { onFailure: (failure) => failures.push(failure) })
+  const claude = item({
+    kind: 'question',
+    state: 'waiting',
+    worktreeName: 'shop',
+    title: 'order',
+    question: parts(titled('Which colour?', ['Red', 'Green', 'Blue']), titled('Which size?', ['Small', 'Medium', 'Large']))
+  })
+  await sender.send(claude, answers([2], [3]))
+  assert.equal(failures.length, 1)
+  const [failure] = failures
+  assert.deepEqual(
+    { ...failure, id: undefined, screen: failure!.screen?.at(-1) },
+    {
+      id: undefined,
+      at: 1000,
+      itemId: 'tab:leaf',
+      agent: 'claude',
+      kind: 'question',
+      where: 'shop / order',
+      reply: { type: 'answers', answers: [[2], [3]] },
+      code: 'terminal_rejected',
+      message: failure!.message,
+      keysSent: ['"2"'],
+      screen: PARTS_FOOTER,
+      draft: null
+    }
+  )
+  assert.match(failure!.message, /answered 1 of 2/)
+})
+
+test('a refusal before any key is recorded with no keys, and a success records nothing', async () => {
+  const failures: ReplyFailure[] = []
+  const refused = harness([CLAUDE_BASH_ASK], { onFailure: (failure) => failures.push(failure) })
+  await refused.sender.send(bashAsk('claude', 'rm -rf build'), decide(true))
+  await refused.sender.send(undefined, text('hi'))
+  const fine = harness([CLAUDE_BASH_ASK], { onFailure: (failure) => failures.push(failure) })
+  await fine.sender.send(bashAsk('claude', 'touch probe.txt'), decide(true))
+  assert.deepEqual(failures.map((f) => [f.code, f.keysSent.length, f.screen === null]), [
+    ['terminal_rejected', 0, false],
+    ['not_found', 0, true]
+  ])
+})
+
+test("a failure keeps the composer's unsent text, which the screen lines don't show", async () => {
+  const failures: ReplyFailure[] = []
+  const { sender } = harness([CLAUDE_IDLE], { draft: 'wip', onFailure: (failure) => failures.push(failure) })
+  await sender.send(item({}), text('ship it'))
+  assert.deepEqual([failures[0]?.code, failures[0]?.draft], ['terminal_rejected', 'wip'])
+})
+
+test('keys read as a person would type them', () => {
+  assert.deepEqual(
+    [describeKey({ text: '\x1b[B' }), describeKey({ text: '\t' }), describeKey({ enter: true }), describeKey({ text: 'hi', enter: true })],
+    ['↓', 'Tab', 'Enter', '"hi" + Enter']
+  )
 })

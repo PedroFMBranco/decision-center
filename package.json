@@ -1,6 +1,6 @@
 {
   "name": "decision-center",
-  "version": "0.2.1",
+  "version": "0.2.3",
   "private": true,
   "type": "module",
   "description": "Orca plugin: a feed of Claude Code and Codex sessions waiting on you.",

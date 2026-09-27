@@ -29,6 +29,10 @@ Permission asks get **Allow** (`1`) and **Deny** (`2`), with an optional note th
 
 Some things are left to the pane itself, behind an **Open pane** button: Codex questions with several parts, parts with no options to pick, and typed answers to those questions.
 
+### Failed replies
+
+When a reply doesn't go through, the item shows **Not sent** with the reason. **Details** (or `!`) opens the failed-replies list, and a **Failed N** button in the header opens it too. Each entry shows what you sent, the error, the keys already typed into the pane, any unsent text in the pane's composer, and the bottom of the pane's screen at that moment. **Copy report** puts them all on the clipboard as JSON. The last 50 are kept in the plugin's own storage on this Mac and are never sent anywhere.
+
 ### Quick replies
 
 If the last message ends with a `Next:` line or a numbered list, its first 3 items become reply chips. Clicking a chip fills the text box. It doesn't send.
@@ -44,7 +48,7 @@ Decision Center raises no banners or sounds of its own. Orca already alerts you:
 The manifest asks for two capabilities:
 
 - `events:subscribe`: wakes the feed when an agent's status changes.
-- `storage`: keeps read and dismissed flags across restarts.
+- `storage`: keeps read and dismissed flags, and the last 50 failed replies, across restarts.
 
 The plugin worker also does these things outside the capability model (Orca doesn't sandbox workers today):
 

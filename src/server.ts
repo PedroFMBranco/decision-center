@@ -4,6 +4,7 @@ import type {
   ApiError,
   ApiErrorCode,
   DismissRequest,
+  FailuresResponse,
   FeedSnapshot,
   HealthResponse,
   OpenRequest,
@@ -23,6 +24,9 @@ export interface ServerDeps {
   read(request: ReadRequest): Promise<ActionResponse>
   dismiss(request: DismissRequest): Promise<ActionResponse>
   suggest(request: SuggestRequest): Promise<SuggestResponse | ApiError>
+  /** Failed replies, newest first (see ReplyFailure). */
+  failures(): Promise<FailuresResponse>
+  clearFailures(): Promise<ActionResponse>
   health(): Omit<HealthResponse, 'ok' | 'version'>
   log(message: string): void
 }
@@ -142,6 +146,10 @@ export function startServer(deps: ServerDeps): Promise<DecisionCenterServer> {
         sendJson(res, 200, await deps.getFeed())
         return
       }
+      if (path === '/api/failures') {
+        sendJson(res, 200, await deps.failures())
+        return
+      }
       if (path === '/api/stream') {
         res.writeHead(200, {
           'Content-Type': 'text/event-stream',
@@ -165,6 +173,11 @@ export function startServer(deps: ServerDeps): Promise<DecisionCenterServer> {
         body = await readJson(req)
       } catch (error) {
         sendError(res, 400, 'bad_request', (error as Error).message)
+        return
+      }
+      if (path === '/api/failures/clear') {
+        const result = await deps.clearFailures()
+        sendJson(res, statusFor(result), result)
         return
       }
       if (path === '/api/reply') {

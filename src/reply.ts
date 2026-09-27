@@ -1,4 +1,4 @@
-import type { ActionResponse, ApiErrorCode, FeedItem, FeedOption, FeedQuestion, ReplyRequest } from './contract.ts'
+import type { ActionResponse, ApiErrorCode, FeedItem, FeedOption, FeedQuestion, ReplyFailure, ReplyRequest } from './contract.ts'
 import { OrcaCliError, type TerminalScreen } from './cli.ts'
 
 // Keystrokes, verified live against Claude Code 2.1.283 and Codex 0.155.1
@@ -21,6 +21,21 @@ export interface SenderDeps {
   screen(handle: string): Promise<TerminalScreen>
   send(handle: string, input: { text?: string; enter?: boolean }): Promise<void>
   sleep?(ms: number): Promise<void>
+  /** Called once for every reply that fails, with what the sender saw and typed. */
+  onFailure?(failure: ReplyFailure): void
+  now?(): number
+}
+
+/** How many screen lines a failure keeps: enough to see the prompt, not the scrollback. */
+const FAILURE_SCREEN_LINES = 40
+
+/** Keys as a person would read them in a report. */
+export function describeKey(input: { text?: string; enter?: boolean }): string {
+  const names: Record<string, string> = {
+    '\x1b[A': '↑', '\x1b[B': '↓', '\x1b[C': '→', '\x1b[1;3A': '⌥↑', '\x1b[1;3B': '⌥↓', '\t': 'Tab', '\x1b': 'Esc', '\x7f': '⌫'
+  }
+  const text = input.text ? (names[input.text] ?? JSON.stringify(input.text)) : ''
+  return [text, input.enter ? 'Enter' : ''].filter(Boolean).join(' + ')
 }
 
 /** A numbered picker row as the pane renders it. */
@@ -181,9 +196,23 @@ function checkNoDraft(screen: TerminalScreen): void {
 /** Sends one reply to the item's pane, checking the pane's screen first (issue 0015). */
 export class ReplySender {
   private readonly deps: SenderDeps
+  /** What the reply in progress has read and typed, for its failure record. */
+  private trace: { keys: string[]; screen: string[] | null; draft: string | null } = { keys: [], screen: null, draft: null }
 
   constructor(deps: SenderDeps) {
     this.deps = deps
+  }
+
+  private async readScreen(handle: string): Promise<TerminalScreen> {
+    const screen = await this.deps.screen(handle)
+    this.trace.screen = screen.lines
+    this.trace.draft = screen.draft ?? null
+    return screen
+  }
+
+  private async press(handle: string, input: { text?: string; enter?: boolean }): Promise<void> {
+    await this.deps.send(handle, input)
+    this.trace.keys.push(describeKey(input))
   }
 
   private sleep(ms: number): Promise<void> {
@@ -191,14 +220,14 @@ export class ReplySender {
   }
 
   private async key(handle: string, input: { text?: string; enter?: boolean }): Promise<void> {
-    await this.deps.send(handle, input)
+    await this.press(handle, input)
     await this.sleep(KEY_GAP_MS)
   }
 
   /** Re-reads the screen until `ready` holds, for keys whose effect takes a repaint. */
   private async screenUntil(handle: string, ready: (lines: string[]) => boolean): Promise<TerminalScreen | null> {
     for (let waited = 0; waited <= SCREEN_WAIT_MS; waited += KEY_GAP_MS) {
-      const screen = await this.deps.screen(handle)
+      const screen = await this.readScreen(handle)
       if (ready(screen.lines)) {
         return screen
       }
@@ -208,6 +237,33 @@ export class ReplySender {
   }
 
   async send(item: FeedItem | undefined, request: ReplyRequest): Promise<ActionResponse> {
+    this.trace = { keys: [], screen: null, draft: null }
+    const result = await this.attempt(item, request)
+    if (!result.ok) {
+      this.deps.onFailure?.(this.failure(item, request, result.error))
+    }
+    return result
+  }
+
+  private failure(item: FeedItem | undefined, request: ReplyRequest, error: { code: ApiErrorCode; message: string }): ReplyFailure {
+    const at = this.deps.now?.() ?? Date.now()
+    return {
+      id: `${at.toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      at,
+      itemId: request.id,
+      agent: item?.agent ?? null,
+      kind: item?.kind ?? null,
+      where: item ? `${item.worktreeName} / ${item.title}` : null,
+      reply: request.reply,
+      code: error.code,
+      message: error.message,
+      keysSent: [...this.trace.keys],
+      screen: this.trace.screen?.slice(-FAILURE_SCREEN_LINES) ?? null,
+      draft: this.trace.draft
+    }
+  }
+
+  private async attempt(item: FeedItem | undefined, request: ReplyRequest): Promise<ActionResponse> {
     try {
       if (!item) {
         refuse('not_found', `no feed item ${request.id}`)
@@ -252,26 +308,26 @@ export class ReplySender {
     if (reply.type !== 'text') {
       refuse('bad_request', 'this item has no options to pick; reply with text')
     }
-    const screen = await this.deps.screen(handle)
+    const screen = await this.readScreen(handle)
     if (claudePickerFooter(screen.lines) >= 0 || codexPickerFooter(screen.lines) >= 0) {
       refuse('terminal_rejected', 'the pane has a picker open; answer it there or wait for the feed to catch up')
     }
     checkNoDraft(screen)
     const text = reply.text
     try {
-      await this.deps.send(handle, { text, enter: true })
+      await this.press(handle, { text, enter: true })
     } catch (error) {
       // Why: a stale `agentWait` blocks text+Enter in one send; split, it goes through (issue 0004).
       if (!(error instanceof OrcaCliError && error.code === 'agent_prompt_blocked')) {
         throw error
       }
       await this.key(handle, { text })
-      await this.deps.send(handle, { enter: true })
+      await this.press(handle, { enter: true })
     }
   }
 
   private async claudeQuestion(handle: string, item: FeedItem, reply: ReplyRequest['reply']): Promise<void> {
-    const screen = await this.deps.screen(handle)
+    const screen = await this.readScreen(handle)
     const footer = claudePickerFooter(screen.lines)
     if (footer < 0) {
       // Why: Orca can keep a pane `waiting` after the picker is cancelled.
@@ -316,7 +372,7 @@ export class ReplySender {
       // is refused while the picker is up (issue 0004). A newline would submit early.
       await this.key(handle, { text: String(other.index) })
       await this.key(handle, { text: reply.text.replace(/\s*\n\s*/g, ' ') })
-      await this.deps.send(handle, { enter: true })
+      await this.press(handle, { enter: true })
       return
     }
 
@@ -326,18 +382,18 @@ export class ReplySender {
     checkOptions(rows, reply.indexes, item.question?.options ?? [])
     if (!multiSelect) {
       // A bare digit selects and submits.
-      await this.deps.send(handle, { text: String(reply.indexes[0]) })
+      await this.press(handle, { text: String(reply.indexes[0]) })
       return
     }
     // Each digit toggles a box; Right opens the review; 1 submits it.
     for (const index of new Set(reply.indexes)) {
       await this.key(handle, { text: String(index) })
     }
-    await this.deps.send(handle, { text: RIGHT })
+    await this.press(handle, { text: RIGHT })
     if (!(await this.screenUntil(handle, claudeReviewShown))) {
       refuse('terminal_rejected', "the options are ticked but the review screen didn't open; submit in the pane")
     }
-    await this.deps.send(handle, { text: '1' })
+    await this.press(handle, { text: '1' })
   }
 
   /**
@@ -377,7 +433,7 @@ export class ReplySender {
     if (!(await this.screenUntil(handle, claudeReviewShown))) {
       refuse('terminal_rejected', "every question is answered but the review screen didn't open; submit in the pane")
     }
-    await this.deps.send(handle, { text: '1' })
+    await this.press(handle, { text: '1' })
   }
 
   /**
@@ -385,7 +441,7 @@ export class ReplySender {
    * amend it, the note, Enter. Rows: 1. Yes, 2. Yes and always allow…, 3. No.
    */
   private async claudePermission(handle: string, item: FeedItem, reply: PermissionReply): Promise<void> {
-    const screen = await this.deps.screen(handle)
+    const screen = await this.readScreen(handle)
     const footer = claudePermissionFooter(screen.lines)
     if (footer < 0) {
       refuse('terminal_rejected', "the permission ask isn't open in the pane any more")
@@ -396,7 +452,7 @@ export class ReplySender {
     const row = decisionRow(pickerRows(screen.lines, footer), reply.allow)
     const note = reply.note?.replace(/\s*\n\s*/g, ' ').trim()
     if (!note) {
-      await this.deps.send(handle, { text: String(row.index) })
+      await this.press(handle, { text: String(row.index) })
       return
     }
     if (!screen.lines.some((line) => /^\s*❯\s*1\./.test(line))) {
@@ -405,7 +461,7 @@ export class ReplySender {
     for (let i = 1; i < row.index; i++) {
       await this.key(handle, { text: DOWN })
     }
-    await this.deps.send(handle, { text: TAB })
+    await this.press(handle, { text: TAB })
     // Why: in amend mode the footer drops "Tab to amend", and typed text lands on the row.
     const amending = await this.screenUntil(handle, (lines) => {
       const at = claudePermissionFooter(lines)
@@ -415,12 +471,12 @@ export class ReplySender {
       refuse('terminal_rejected', "the note box didn't open; answer in the pane")
     }
     await this.key(handle, { text: note })
-    await this.deps.send(handle, { enter: true })
+    await this.press(handle, { enter: true })
   }
 
   /** Codex: the row's digit decides. A note follows as a normal message once the prompt closes. */
   private async codexPermission(handle: string, item: FeedItem, reply: PermissionReply): Promise<void> {
-    const screen = await this.deps.screen(handle)
+    const screen = await this.readScreen(handle)
     const footer = codexPermissionFooter(screen.lines)
     if (footer < 0) {
       refuse('terminal_rejected', "the approval prompt isn't open in the pane any more")
@@ -431,7 +487,7 @@ export class ReplySender {
       refuse('terminal_rejected', `the pane is asking to run "${command.trim().slice(2)}", not "${summary}"`)
     }
     const row = decisionRow(pickerRows(screen.lines, footer), reply.allow)
-    await this.deps.send(handle, { text: String(row.index) })
+    await this.press(handle, { text: String(row.index) })
     const note = reply.note?.trim()
     if (!note) {
       return
@@ -455,13 +511,13 @@ export class ReplySender {
     if (reply.indexes.length > 1) {
       refuse('bad_request', 'Codex questions take one option')
     }
-    let screen = await this.deps.screen(handle)
+    let screen = await this.readScreen(handle)
     let openedHere = false
     if (codexPickerFooter(screen.lines) < 0) {
       if (!codexQuestionQueued(screen.lines)) {
         refuse('terminal_rejected', "the question isn't waiting in the pane any more")
       }
-      await this.deps.send(handle, { text: OPTION_UP })
+      await this.press(handle, { text: OPTION_UP })
       const opened = await this.screenUntil(handle, (lines) => codexPickerFooter(lines) >= 0)
       if (!opened) {
         refuse('terminal_rejected', "the question picker didn't open")
@@ -474,11 +530,11 @@ export class ReplySender {
     } catch (error) {
       // Why: leave the pane as it was, with the question still queued.
       if (openedHere) {
-        await this.deps.send(handle, { text: OPTION_DOWN })
+        await this.press(handle, { text: OPTION_DOWN })
       }
       throw error
     }
     // A bare digit selects and submits.
-    await this.deps.send(handle, { text: String(reply.indexes[0]) })
+    await this.press(handle, { text: String(reply.indexes[0]) })
   }
 }

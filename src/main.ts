@@ -9,6 +9,7 @@ import {
   type SuggestResponse
 } from './contract.ts'
 import { OrcaCliError, claudePrint, openBrowserTab, terminalHandleForPane, terminalScreen, terminalSend, terminalSwitch, worktreePs } from './cli.ts'
+import { FAILURES_KEY, FailureLog } from './failures.ts'
 import { itemKey } from './feed.ts'
 import { PAGE } from './page.ts'
 import { SUGGEST_SYSTEM_PROMPT, Suggester } from './proposals.ts'
@@ -102,7 +103,17 @@ export default function activate(orca: OrcaWorkerApi): void {
     return refreshing
   }
 
-  const sender = new ReplySender({ terminalFor: terminalHandleForPane, screen: terminalScreen, send: terminalSend })
+  const failures = new FailureLog({
+    load: async () => ((await orca.host.call('storage.get', { key: FAILURES_KEY })) as { value?: unknown } | null)?.value,
+    save: async (list) => void (await orca.host.call('storage.set', { key: FAILURES_KEY, value: list })),
+    log: orca.log
+  })
+  const sender = new ReplySender({
+    terminalFor: terminalHandleForPane,
+    screen: terminalScreen,
+    send: terminalSend,
+    onFailure: (failure) => void failures.add(failure)
+  })
 
   async function reply(request: ReplyRequest): Promise<ActionResponse> {
     const result = await sender.send(store.item(request.id), request)
@@ -164,6 +175,11 @@ export default function activate(orca: OrcaWorkerApi): void {
     read: (request) => change(store.read(request.id)),
     dismiss: (request) => change(store.dismiss(request)),
     suggest,
+    failures: async () => ({ ok: true, failures: await failures.list() }),
+    clearFailures: async () => {
+      await failures.clear()
+      return { ok: true }
+    },
     health: () => ({ pid: process.pid, startedAt, lastHeartbeatAt }),
     log: orca.log
   })

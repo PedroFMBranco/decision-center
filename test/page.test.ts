@@ -18,6 +18,6 @@ test('the page loads nothing from outside the server', () => {
 })
 
 test('the page calls only endpoints the contract defines', () => {
-  const paths = new Set([...page.matchAll(/["'`](\/api\/[a-z]+)["'`]/g)].map((match) => match[1]))
-  assert.deepEqual([...paths].sort(), ['/api/dismiss', '/api/open', '/api/read', '/api/reply', '/api/stream', '/api/suggest'])
+  const paths = new Set([...page.matchAll(/["'`](\/api\/[a-z/]+)["'`]/g)].map((match) => match[1]))
+  assert.deepEqual([...paths].sort(), ['/api/dismiss', '/api/failures', '/api/failures/clear', '/api/open', '/api/read', '/api/reply', '/api/stream', '/api/suggest'])
 })
