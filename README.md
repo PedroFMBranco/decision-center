@@ -62,7 +62,7 @@ npm run build     # rebuild dist/main.mjs; commit it
 npm run preview   # serve the page against fixtures
 ```
 
-To load it while developing, add this folder under Settings → Plugins → Development. The worker doesn't reload on edit: bump `version` in `orca-plugin.json` after a rebuild.
+To load it while developing, add this folder's absolute path under Settings → Plugins → Development. Orca doesn't expand `~`, so `~/…` shows up as an invalid plugin. The worker doesn't reload on edit: bump `version` in `orca-plugin.json` after a rebuild.
 
 ## License
 
