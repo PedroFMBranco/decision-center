@@ -1,0 +1,19 @@
+{
+  "name": "decision-center",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Orca plugin: a feed of Claude Code and Codex sessions waiting on you.",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "tsc --noEmit && node --test test/*.test.ts && node scripts/check-bundle.mjs && node scripts/check-package.mjs",
+    "preview": "node scripts/preview.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "esbuild": "0.28.2",
+    "typescript": "^7.0.2"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,8 @@
+node_modules/
+.DS_Store
+
+# Planning history for this plugin. Kept on disk, not shipped: every
+# committed file ends up in the installed plugin.
+issues/
+research/
+prototype/

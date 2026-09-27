@@ -1,0 +1,39 @@
+{
+  "manifestVersion": 1,
+  "id": "decision-center",
+  "publisher": "coldfox",
+  "name": "Decision Center",
+  "version": "0.2.0",
+  "description": "A feed of Claude Code and Codex sessions that finished, need permission, or asked a question. Reply without switching panes.",
+  "author": {
+    "name": "coldfox",
+    "url": "https://github.com/PedroFMBranco"
+  },
+  "repository": "https://github.com/PedroFMBranco/orca-decision-center",
+  "engines": {
+    "orca": ">=1.4.206"
+  },
+  "pluginApi": 1,
+  "main": "dist/main.mjs",
+  "contributes": {
+    "commands": [
+      {
+        "id": "open",
+        "title": "Decision Center: Open"
+      }
+    ],
+    "events": [
+      {
+        "on": "agent.status.changed"
+      }
+    ]
+  },
+  "capabilities": [
+    {
+      "kind": "storage"
+    },
+    {
+      "kind": "events:subscribe"
+    }
+  ]
+}
