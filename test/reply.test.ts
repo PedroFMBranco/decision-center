@@ -228,3 +228,173 @@ test('permission asks, closed sessions and unknown items never get keys', async 
   assert.equal(code(await sender.send(undefined, text('hi'))), 'not_found')
   assert.deepEqual(sent, [])
 })
+
+// Permission prompts and multi-question pickers, captured 2026-09-27 (issues 0021, 0022).
+const RULE = '─'.repeat(40)
+const CLAUDE_BASH_ASK = [
+  '⏺ Bash(touch probe.txt)',
+  '  ⎿  Waiting…',
+  RULE,
+  ' Bash command',
+  '   touch probe.txt',
+  '   Create a probe file',
+  ' Do you want to proceed?',
+  ' ❯ 1. Yes',
+  '   2. Yes, and always allow access to /tmp/pane from this project',
+  '   3. No',
+  ' Esc to cancel · Tab to amend'
+]
+const CLAUDE_WRITE_ASK = [
+  '⏺ Write(notes.txt)',
+  RULE,
+  ' Create file',
+  ' notes.txt',
+  '╌╌╌╌',
+  '  1 hi',
+  '╌╌╌╌',
+  ' Do you want to create notes.txt?',
+  ' ❯ 1. Yes',
+  '   2. Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session (shift+tab)',
+  '   3. No',
+  ' Esc to cancel · Tab to amend'
+]
+// After Down, Down, Tab: the highlighted row turns into a note field.
+const CLAUDE_BASH_AMEND = [
+  ...CLAUDE_BASH_ASK.slice(0, 7),
+  '   1. Yes',
+  '   2. Yes, and always allow access to /tmp/pane from this project',
+  ' ❯ 3. No, and tell Claude what to do differently',
+  ' Esc to cancel'
+]
+const CODEX_ASK = [
+  '• Running touch codex-probe.txt',
+  '  Would you like to run the following command?',
+  '  Environment: local',
+  '  Reason: May I create codex-probe.txt in the current directory, as requested?',
+  '  $ touch codex-probe.txt',
+  '› 1. Yes, proceed (y)',
+  "  2. Yes, and don't ask again for commands that start with `touch codex-probe.txt` (p)",
+  '  3. No, and tell Codex what to do differently (esc)',
+  '  Press enter to confirm or esc to cancel'
+]
+const CODEX_WORKING = ['✔ You approved codex to run touch codex-probe.txt this time', '• Working (11s • esc to interrupt)', '› Ask Codex to do anything']
+const PARTS_FOOTER = 'Enter to select · Tab/Arrow keys to navigate · Esc to cancel'
+const partScreen = (tabs: string, heading: string, labels: string[], box = false) => [
+  RULE,
+  tabs,
+  heading,
+  ...labels.map((label, i) => `${i ? '  ' : '❯ '}${i + 1}. ${box ? '[ ] ' : ''}${label}`),
+  `  ${labels.length + 1}. Type something.`,
+  '────',
+  `  ${labels.length + 2}. Chat about this`,
+  PARTS_FOOTER
+]
+const COLOUR = partScreen('←  ☐ Color  ☐ Size  ✔ Submit  →', 'Which colour?', ['Red', 'Green', 'Blue'])
+const SIZE = partScreen('←  ☒ Color  ☐ Size  ✔ Submit  →', 'Which size?', ['Small', 'Medium', 'Large'])
+const TOPPINGS = partScreen('←  ☐ Toppings  ☐ Size  ✔ Submit  →', 'Which toppings?', ['Cheese', 'Olive', 'Mushroom'], true)
+const PARTS_REVIEW = [
+  '←  ☒ Color  ☒ Size  ✔ Submit  →',
+  'Review your answers',
+  ' ● Which colour?',
+  '   → Green',
+  ' ● Which size?',
+  '   → Large',
+  'Ready to submit your answers?',
+  '❯ 1. Submit answers',
+  '  2. Cancel'
+]
+
+const decide = (allow: boolean, note?: string): ReplyRequest => ({
+  id: 'tab:leaf',
+  reply: { type: 'permission', allow, ...(note ? { note } : {}) }
+})
+const answers = (...parts: number[][]): ReplyRequest => ({ id: 'tab:leaf', reply: { type: 'answers', answers: parts } })
+const bashAsk = (agent: 'claude' | 'codex', summary: string) =>
+  item({ agent, kind: 'permission', state: 'waiting', permission: { toolName: 'Bash', summary } })
+
+test('Claude permission: Allow sends 1 and Deny sends the No row, never the always-allow row', async () => {
+  const allow = harness([CLAUDE_BASH_ASK])
+  assert.equal(code(await allow.sender.send(bashAsk('claude', 'touch probe.txt'), decide(true))), 'ok')
+  assert.deepEqual(allow.sent, ['"1"'])
+  const deny = harness([CLAUDE_WRITE_ASK])
+  const write = item({ kind: 'permission', state: 'waiting', permission: { toolName: 'Write', summary: '/tmp/pane/notes.txt' } })
+  assert.equal(code(await deny.sender.send(write, decide(false))), 'ok')
+  assert.deepEqual(deny.sent, ['"3"'])
+})
+
+test('Claude permission with a note moves to the row, amends it with Tab, types, and submits', async () => {
+  const { sender, sent } = harness([CLAUDE_BASH_ASK, CLAUDE_BASH_AMEND])
+  assert.equal(code(await sender.send(bashAsk('claude', 'touch probe.txt'), decide(false, 'skip it,\nsay why'))), 'ok')
+  assert.deepEqual(sent, ['"\\u001b[B"', '"\\u001b[B"', '"\\t"', '"skip it, say why"', '""+enter'])
+})
+
+test('Claude permission refuses when the pane asks about something else, or nothing', async () => {
+  const other = harness([CLAUDE_BASH_ASK])
+  assert.equal(code(await other.sender.send(bashAsk('claude', 'rm -rf build'), decide(true))), 'terminal_rejected')
+  const gone = harness([CLAUDE_IDLE])
+  assert.equal(code(await gone.sender.send(bashAsk('claude', 'touch probe.txt'), decide(true))), 'terminal_rejected')
+  assert.deepEqual([...other.sent, ...gone.sent], [])
+})
+
+test('Codex permission: the digit decides, and a note follows as a message once the prompt closes', async () => {
+  const deny = harness([CODEX_ASK])
+  assert.equal(code(await deny.sender.send(bashAsk('codex', 'touch codex-probe.txt'), decide(false))), 'ok')
+  assert.deepEqual(deny.sent, ['"3"'])
+  const noted = harness([CODEX_ASK, CODEX_WORKING])
+  assert.equal(code(await noted.sender.send(bashAsk('codex', 'touch codex-probe.txt'), decide(true, 'then list the folder'))), 'ok')
+  assert.deepEqual(noted.sent, ['"1"', '"then list the folder"+enter'])
+  const other = harness([CODEX_ASK])
+  assert.equal(code(await other.sender.send(bashAsk('codex', 'curl example.com'), decide(true))), 'terminal_rejected')
+})
+
+test('a permission ask only takes a permission reply, and only permission asks do', async () => {
+  const { sender, sent } = harness([CLAUDE_BASH_ASK])
+  assert.equal(code(await sender.send(bashAsk('claude', 'touch probe.txt'), text('yes'))), 'bad_request')
+  assert.equal(code(await sender.send(item({}), decide(true))), 'bad_request')
+  assert.deepEqual(sent, [])
+})
+
+function parts(...questions: FeedQuestion[]): FeedQuestion {
+  const [first, ...more] = questions
+  return { ...first!, more }
+}
+const titled = (title: string, labels: string[], multiSelect = false) => ({ ...question(labels, multiSelect), title })
+
+test('a Claude picker with several questions answers each part, then submits the review', async () => {
+  const { sender, sent } = harness([COLOUR, COLOUR, SIZE, PARTS_REVIEW])
+  const claude = item({
+    kind: 'question',
+    state: 'waiting',
+    question: parts(titled('Which colour?', ['Red', 'Green', 'Blue']), titled('Which size?', ['Small', 'Medium', 'Large']))
+  })
+  assert.equal(code(await sender.send(claude, answers([2], [3]))), 'ok')
+  assert.deepEqual(sent, ['"2"', '"3"', '"1"'])
+})
+
+test('a multi-select part ticks its boxes, then Right moves to the next part', async () => {
+  const { sender, sent } = harness([TOPPINGS, TOPPINGS, SIZE, PARTS_REVIEW])
+  const claude = item({
+    kind: 'question',
+    state: 'waiting',
+    question: parts(titled('Which toppings?', ['Cheese', 'Olive', 'Mushroom'], true), titled('Which size?', ['Small', 'Medium', 'Large']))
+  })
+  assert.equal(code(await sender.send(claude, answers([1, 3], [2]))), 'ok')
+  assert.deepEqual(sent, ['"1"', '"3"', '"\\u001b[C"', '"2"', '"1"'])
+})
+
+test('several questions refuse a single pick, a missing answer, and a part that never shows', async () => {
+  const claude = item({
+    kind: 'question',
+    state: 'waiting',
+    question: parts(titled('Which colour?', ['Red', 'Green', 'Blue']), titled('Which size?', ['Small', 'Medium', 'Large']))
+  })
+  const single = harness([COLOUR])
+  assert.equal(code(await single.sender.send(claude, pick(1))), 'bad_request')
+  const short = harness([COLOUR])
+  assert.equal(code(await short.sender.send(claude, answers([1]))), 'bad_request')
+  const stuck = harness([COLOUR])
+  const result = await stuck.sender.send(claude, answers([2], [3]))
+  assert.equal(code(result), 'terminal_rejected')
+  assert.match((result as { error: { message: string } }).error.message, /answered 1 of 2/)
+  assert.deepEqual([...single.sent, ...short.sent, ...stuck.sent], ['"2"'])
+})

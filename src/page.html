@@ -205,6 +205,10 @@ header.top { display: flex; align-items: center; gap: 16px; padding: 14px 20px; 
 .term::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--p) 18%, transparent), transparent); transform: translateX(-100%); animation: scan 2.8s var(--ease) infinite; }
 @keyframes scan { 60%, 100% { transform: translateX(100%); } }
 .note { font-size: 12px; color: var(--ink-3); margin-top: 12px; }
+/* a question with several parts: the highlighted part takes the digits */
+.part { margin-top: 18px; padding-left: 14px; border-left: 2px solid transparent; transition: border-color .2s; }
+.part.active { border-left-color: var(--tone); }
+.part h3 { font-size: 17px; }
 
 /* ---------- reply dock ---------- */
 .dock { padding: 14px 28px 18px; border-top: 1px solid var(--edge); backdrop-filter: blur(14px); background: color-mix(in srgb, var(--bg) 82%, transparent); }
@@ -340,7 +344,8 @@ header.top { display: flex; align-items: center; gap: 16px; padding: 14px 20px; 
     <dt><kbd>j</kbd> <kbd>k</kbd></dt><dd>Move down / up the feed</dd>
     <dt><kbd>n</kbd></dt><dd>Jump to the next unread item (questions first)</dd>
     <dt><kbd>⌘</kbd>+<kbd>K</kbd></dt><dd>Jump to any session by name</dd>
-    <dt><kbd>1</kbd>–<kbd>9</kbd></dt><dd>Finished: put proposal N in the box. Question: pick option N</dd>
+    <dt><kbd>1</kbd>–<kbd>9</kbd></dt><dd>Finished: put proposal N in the box. Question: pick option N. Permission: <kbd>1</kbd> allows, <kbd>2</kbd> denies</dd>
+    <dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>Several questions: move between them. <kbd>Enter</kbd> sends every answer</dd>
     <dt><kbd>s</kbd></dt><dd>Suggest replies (when none parsed)</dd>
     <dt><kbd>r</kbd> or <kbd>/</kbd></dt><dd>Focus the reply box</dd>
     <dt><kbd>Enter</kbd></dt><dd>In the box: send. <kbd>Shift</kbd>+<kbd>Enter</kbd> adds a line</dd>
@@ -392,10 +397,14 @@ const where = i => `<b>${esc(i.worktreeName)}</b> / ${esc(i.title)}`;
 const short = i => i.worktreeName + " / " + (i.title.length > 32 ? i.title.slice(0, 31) + "…" : i.title);
 
 // What each question accepts, mirroring the reply sender's refusals (src/reply.ts).
-const multiPart = i => i.kind === "question" && /\(\+\d+ more\)\s*$/.test(i.question.title);
-const multiPick = i => i.kind === "question" && i.question.multiSelect && i.agent === "claude";
-const takesText = i => i.kind === "finished" || (i.kind === "question" && !multiPart(i) && !multiPick(i));
-const inPaneOnly = i => i.kind === "permission" || multiPart(i);
+const partsOf = i => i.kind === "question" ? [i.question, ...(i.question.more || [])] : [];
+const multiPart = i => i.kind === "question" && !!i.question.more?.length;
+const multiPick = i => i.kind === "question" && !multiPart(i) && i.question.multiSelect && i.agent === "claude";
+const takesText = i => i.kind === "finished" || i.kind === "permission" || (i.kind === "question" && !multiPart(i) && !multiPick(i));
+// Several questions go part by part for Claude only; Codex's, and parts with no options, stay in the pane.
+const inPaneOnly = i => multiPart(i) && (i.agent !== "claude" || partsOf(i).some(q => !q.options.length));
+const partPicks = {};     // id -> one Set of option positions per part
+const activePart = {};    // id -> the part the digits pick in
 
 // ---------------------------------------------------------------- feed from the server
 function apply(snapshot) {
@@ -540,7 +549,7 @@ function cardClass(i) {
 }
 function orb(i) { return `<span class="orb ${i.agent}"><span class="st">${GLYPH[stateKey(i)]}</span></span>`; }
 function previewOf(i) {
-  if (i.kind === "question") return i.question.title;
+  if (i.kind === "question") return i.question.title + (multiPart(i) ? ` (+${i.question.more.length} more)` : "");
   if (i.kind === "permission") return `${i.permission.toolName}: ${i.permission.summary}`;
   return (i.lastMessage || "").replace(/[*`#|]/g, "").split("\n").find(l => l.trim()) || "No message yet";
 }
@@ -562,10 +571,16 @@ function renderDetail() {
   let ask = "";
   if (live && i.kind === "question") {
     const q = i.question, p = picks[i.id] || new Set();
-    if (multiPart(i)) {
+    if (inPaneOnly(i)) {
       ask = `<div class="ask s-question"><p class="label">Several questions</p><h3>${esc(q.title)}</h3>
-        <div class="sub">This asks more than one question at once. Answer them in the pane.</div>
+        <div class="sub">This asks ${partsOf(i).length} questions at once${i.agent === "claude" ? ", and some have no options to pick" : ""}. Answer them in the pane.</div>
         <button class="shimmer" data-act="open">Open pane <kbd>o</kbd></button></div>`;
+    } else if (multiPart(i)) {
+      const qs = partsOf(i), all = partPicks[i.id] || [], a = activePart[i.id] || 0;
+      ask = `<div class="ask s-question"><p class="label">${qs.length} questions</p>
+        <div class="sub">Pick an answer for each, then send them together. The digits pick in the highlighted question, and <kbd>←</kbd> <kbd>→</kbd> move between questions.</div>
+        ${qs.map((part, p) => `<div class="part ${p === a ? "active" : ""}"><p class="label">${p + 1} of ${qs.length}${part.header ? " · " + esc(part.header) : ""} · ${part.multiSelect ? "pick one or more" : "pick one"}</p><h3>${esc(part.title)}</h3>
+          <div class="tiles">${part.options.map((o, n) => { const on = !!all[p]?.has(n); return `<button class="tile spot ${on ? "picked" : ""}" data-act="part-opt" data-p="${p}" data-n="${n}" aria-pressed="${on}"><span class="k">${o.index}</span><span class="t">${esc(o.label)}</span>${o.description ? `<span class="d">${esc(o.description)}</span>` : ""}</button>`; }).join("")}</div></div>`).join("")}</div>`;
     } else if (!q.options.length) {
       ask = `<div class="ask s-question"><p class="label">Question</p><h3>${esc(q.title)}</h3><div class="sub">No options to pick. Type your answer below.</div></div>`;
     } else {
@@ -577,8 +592,8 @@ function renderDetail() {
   }
   if (live && i.kind === "permission") ask = `<div class="ask s-permission"><p class="label">Permission</p><h3>Allow ${esc(i.permission.toolName)} to run this?</h3>
       <div class="term">${esc(i.permission.summary || "(no details)")}</div>
-      <div class="tiles"><button class="tile spot" data-act="open"><span class="k">o</span><span class="t">Open pane</span><span class="d">Approve or deny it in the agent's terminal</span></button></div>
-      <div class="note">Permission asks are answered in the pane. Their keystrokes aren't verified, so Decision Center never guesses them.</div></div>`;
+      <div class="tiles"><button class="tile spot" data-act="allow"><span class="k">1</span><span class="t">Allow</span><span class="d">Run it this once</span></button><button class="tile spot" data-act="deny"><span class="k">2</span><span class="t">Deny</span><span class="d">Stop it. Say why in the note</span></button></div>
+      <div class="note">A note typed below goes to ${esc(i.agent)} with your answer. "Always allow" rules are set in the pane.</div></div>`;
   d.innerHTML = `
     <div class="d-head s-${k} ${fresh ? "reveal" : ""}">
       <button class="pillbtn back" data-act="back" aria-label="Back to the feed">←</button>
@@ -611,9 +626,15 @@ function dockHtml(i) {
   if (advancing?.from === i.id) return `<div class="dock s-${k}"><p class="sent-note"><span class="spin"></span>Sending <b>${esc(advancing.label)}</b> when the countdown ends. <kbd>Esc</kbd> to undo and stay.</p></div>`;
   if (posting[i.id]) return `<div class="dock s-${k}"><p class="sent-note"><span class="spin"></span>Sending <b>${esc(posting[i.id].label)}</b>…</p></div>`;
   if (isSent(i)) return `<div class="dock s-${k}"><p class="sent-note"><span class="spin"></span>Sent <b>${esc(sent[i.id].label)}</b>. ${i.agent} is working. This item leaves the feed when you move on.</p></div>`;
-  if (inPaneOnly(i)) return `<div class="dock s-${k}">${errorRow(i)}<p class="sent-note">${i.kind === "permission" ? "Answer this permission ask in the pane." : "Answer these questions in the pane."} <button class="pillbtn" data-act="open">Open pane <kbd>o</kbd></button></p></div>`;
+  if (inPaneOnly(i)) return `<div class="dock s-${k}">${errorRow(i)}<p class="sent-note">Answer these questions in the pane. <button class="pillbtn" data-act="open">Open pane <kbd>o</kbd></button></p></div>`;
+  if (i.kind === "permission") return `<div class="dock s-${k}">${errorRow(i)}
+    <div class="compose"><div class="field"><textarea rows="1" placeholder="Optional note for ${esc(i.agent)}…" aria-label="Note"></textarea></div><button class="send" data-act="allow">Allow <kbd style="color:inherit;border-color:currentColor;background:none">1</kbd></button><button class="pillbtn" data-act="deny">Deny <kbd>2</kbd></button></div>
+    <div class="hint"><span><kbd>1</kbd> allow</span><span><kbd>2</kbd> deny</span><span><kbd>r</kbd> write a note, <kbd>Esc</kbd> to leave it</span><span><kbd>n</kbd> next</span></div></div>`;
   let top = "";
-  if (multiPick(i)) {
+  if (multiPart(i)) {
+    const qs = partsOf(i), all = partPicks[i.id] || [], done = qs.filter((_, p) => all[p]?.size).length;
+    top = `<div class="row"><button class="shimmer" data-act="submit-parts" ${partsDone(i) ? "" : "disabled"}>Send answers <kbd>↵</kbd></button><span class="src">${done === qs.length ? esc(partsLabel(i)) : `${done} of ${qs.length} answered`}</span></div>`;
+  } else if (multiPick(i)) {
     const p = picks[i.id] || new Set();
     top = `<div class="row"><button class="shimmer" data-act="submit-multi" ${p.size ? "" : "disabled"}>Send ${p.size ? p.size + " picked" : "picks"}</button><span class="src">${p.size ? [...p].map(x => esc(i.question.options[x].label)).join(" + ") : "Nothing picked yet"}</span></div>`;
   } else if (i.kind === "finished") {
@@ -623,7 +644,7 @@ function dockHtml(i) {
     else if (props.length) top = `<div class="row">${props.map((p, n) => `<button class="prop" data-act="prop" data-n="${n}"><span class="k">${n + 1}</span><span class="t">${esc(p)}</span></button>`).join("")}<span class="src">${i.proposals.length ? "from the message" : "suggested by Haiku"}</span></div>`;
     else if (i.canSuggest) top = `<div class="row"><button class="shimmer" data-act="suggest"><svg class="spark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z"/></svg>Suggest replies <kbd>s</kbd></button><span class="src">No next actions found in the message</span></div>`;
   }
-  if (!takesText(i)) return `<div class="dock s-${k}">${errorRow(i)}${top}<div class="row"><span class="src">Typed answers to multi-select questions go in the pane.</span><button class="pillbtn" data-act="open">Open pane <kbd>o</kbd></button></div></div>`;
+  if (!takesText(i)) return `<div class="dock s-${k}">${errorRow(i)}${top}<div class="row"><span class="src">${multiPart(i) ? "Typed answers to these questions go in the pane." : "Typed answers to multi-select questions go in the pane."}</span><button class="pillbtn" data-act="open">Open pane <kbd>o</kbd></button></div></div>`;
   const placeholder = i.kind === "question" ? (i.question.options.length ? "Other: type your own answer…" : "Type your answer…") : "Reply to " + i.agent + "…";
   return `<div class="dock s-${k}">${errorRow(i)}${top}
     <div class="compose"><div class="field"><textarea rows="1" placeholder="${placeholder}" aria-label="Reply"></textarea></div><button class="send" data-act="send">Send <kbd style="color:inherit;border-color:currentColor;background:none">↵</kbd></button></div>
@@ -745,6 +766,32 @@ function submitMulti(i) {
   picks[i.id] = new Set();
   send(i, p.map(x => i.question.options[x].label).join(" + "), { type: "option", indexes: p.map(x => i.question.options[x].index) });
 }
+function pickPart(i, p, n) {
+  const qs = partsOf(i), part = qs[p];
+  if (!part?.options[n] || inPaneOnly(i)) return;
+  if (partPicks[i.id]?.length !== qs.length) partPicks[i.id] = qs.map(() => new Set());
+  const set = partPicks[i.id][p];
+  if (part.multiSelect) set.has(n) ? set.delete(n) : set.add(n);
+  else { set.clear(); set.add(n); }
+  activePart[i.id] = part.multiSelect ? p : Math.min(p + 1, qs.length - 1); // a single pick moves on by itself
+  render();
+}
+const partsDone = i => partPicks[i.id]?.length === partsOf(i).length && partPicks[i.id].every(set => set.size);
+const sortedPicks = (i, p) => [...partPicks[i.id][p]].sort((a, b) => a - b);
+const partsLabel = i => partsOf(i).map((q, p) => sortedPicks(i, p).map(n => q.options[n].label).join(" + ")).join(" · ");
+function submitParts(i) {
+  if (!multiPart(i) || inPaneOnly(i)) return;
+  if (!partsDone(i)) return toast("Pick an answer for every question first.", true);
+  const answers = partsOf(i).map((q, p) => sortedPicks(i, p).map(n => q.options[n].index));
+  const label = partsLabel(i);
+  delete partPicks[i.id]; activePart[i.id] = 0;
+  send(i, label, { type: "answers", answers });
+}
+function decidePermission(i, allow) {
+  if (!i || i.kind !== "permission" || busy(i)) return;
+  const note = (drafts[i.id] || "").trim();
+  send(i, (allow ? "Allow" : "Deny") + (note ? ` + “${note.length > 30 ? note.slice(0, 30) + "…" : note}”` : ""), { type: "permission", allow, ...(note ? { note } : {}) });
+}
 function useProposal(i, n) {
   const gen = suggestions[i.id + "@" + episode(i)];
   const props = i.proposals.length ? i.proposals : Array.isArray(gen) ? gen : [];
@@ -763,6 +810,7 @@ async function suggest(i) {
 }
 function sendText(i) {
   if (!i || !takesText(i) || busy(i)) return;
+  if (i.kind === "permission") return toast("Pick Allow (1) or Deny (2). Esc leaves the note box.");
   const text = (drafts[i.id] || "").trim(); if (!text) return;
   send(i, `“${text.length > 40 ? text.slice(0, 40) + "…" : text}”`, { type: "text", text });
 }
@@ -832,6 +880,10 @@ document.addEventListener("click", e => {
     case "expand": expanded[i.id] = !expanded[i.id]; return render();
     case "opt": return pickOption(i, n);
     case "submit-multi": return submitMulti(i);
+    case "part-opt": return pickPart(i, +b.dataset.p, n);
+    case "submit-parts": return submitParts(i);
+    case "allow": return decidePermission(i, true);
+    case "deny": return decidePermission(i, false);
     case "prop": return useProposal(i, n);
     case "suggest": return suggest(i);
     case "send": return sendText(i);
@@ -860,6 +912,14 @@ document.addEventListener("keydown", e => {
   if (advancing && e.key === "Enter") { e.preventDefault(); return finish(); }
   if (!i) return;
   if (busy(i) && e.key !== "x") return;
+  if (multiPart(i) && !inPaneOnly(i)) {
+    if (e.key === "Enter") { e.preventDefault(); return submitParts(i); }
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      e.preventDefault();
+      activePart[i.id] = Math.max(0, Math.min(partsOf(i).length - 1, (activePart[i.id] || 0) + (e.key === "ArrowRight" ? 1 : -1)));
+      return render();
+    }
+  }
   switch (e.key) {
     case "x": return dismiss([i.id]);
     case "o": return openPane(i);
@@ -868,6 +928,8 @@ document.addEventListener("keydown", e => {
   }
   if (/^[1-9]$/.test(e.key) && i.kind !== "closed") {
     const n = +e.key - 1;
+    if (i.kind === "permission") { if (n < 2) decidePermission(i, n === 0); return; }
+    if (multiPart(i)) { const p = activePart[i.id] || 0; return pickPart(i, p, partsOf(i)[p].options.findIndex(o => o.index === n + 1)); }
     if (i.kind === "question") return pickOption(i, i.question.options.findIndex(o => o.index === n + 1));
     if (i.kind === "finished" && n < 3) { e.preventDefault(); return useProposal(i, n); }
   }

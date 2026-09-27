@@ -43,15 +43,9 @@ interface RawQuestion {
   options?: RawOption[]
 }
 
-/** Claude's AskUserQuestion input and Codex's request_user_input share this shape, near enough. */
-export function questionFromArgs(args: { questions?: RawQuestion[] } | null | undefined): FeedQuestion | null {
-  const questions = args?.questions
-  const first = questions?.[0]
-  if (!first) {
-    return null
-  }
-  const title = (first.question ?? first.title ?? first.header ?? '').trim()
-  const options: FeedOption[] = (first.options ?? []).flatMap((option, i) => {
+function partFromRaw(raw: RawQuestion): FeedQuestion {
+  const title = (raw.question ?? raw.title ?? raw.header ?? '').trim()
+  const options: FeedOption[] = (raw.options ?? []).flatMap((option, i) => {
     const label = typeof option === 'string' ? option : option?.label
     if (!label) {
       return []
@@ -59,8 +53,21 @@ export function questionFromArgs(args: { questions?: RawQuestion[] } | null | un
     const description = typeof option === 'string' ? undefined : option.description
     return [{ index: i + 1, label, ...(description ? { description } : {}) }]
   })
-  const more = questions.length > 1 ? ` (+${questions.length - 1} more)` : ''
-  return { title: `${title || 'Question'}${more}`, multiSelect: first.multiSelect === true, options }
+  const header = raw.header?.trim()
+  return { title: title || 'Question', ...(header ? { header } : {}), multiSelect: raw.multiSelect === true, options }
+}
+
+/**
+ * Claude's AskUserQuestion input and Codex's request_user_input share this
+ * shape, near enough. The first question carries the rest in `more`.
+ */
+export function questionFromArgs(args: { questions?: RawQuestion[] } | null | undefined): FeedQuestion | null {
+  const [first, ...rest] = (args?.questions ?? []).filter(Boolean)
+  if (!first) {
+    return null
+  }
+  const question = partFromRaw(first)
+  return rest.length ? { ...question, more: rest.map(partFromRaw) } : question
 }
 
 export interface ParsedPrompt {

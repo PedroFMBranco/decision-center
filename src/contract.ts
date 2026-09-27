@@ -32,9 +32,13 @@ export interface FeedOption {
 
 export interface FeedQuestion {
   title: string
+  /** Claude's short tab label for the question, when it has one. */
+  header?: string
   multiSelect: boolean
   /** Empty for title-only questions: answer them with free text. */
   options: FeedOption[]
+  /** The other questions asked in the same picker, in order (issue 0022). */
+  more?: FeedQuestion[]
 }
 
 export interface FeedPermission {
@@ -97,6 +101,10 @@ export interface ReplyRequest {
     | { type: 'text'; text: string }
     /** 1-based option indexes; more than one only for multi-select. */
     | { type: 'option'; indexes: number[] }
+    /** A question with several parts: one list of option indexes per part, in order. */
+    | { type: 'answers'; answers: number[][] }
+    /** A permission ask. The note goes to the agent with the decision (issue 0021). */
+    | { type: 'permission'; allow: boolean; note?: string }
 }
 
 /** `POST /api/read` marks an item read. */

@@ -25,7 +25,9 @@ Installs never run a build. The committed `dist/main.mjs` is what runs.
 
 Press `?` for every shortcut. `⌘K` jumps to any item.
 
-Some things are left to the pane itself: permission asks and questions with several parts only get an **Open pane** button, which switches to that pane.
+Permission asks get **Allow** (`1`) and **Deny** (`2`), with an optional note that goes to the agent with your answer. "Always allow" rules are set in the pane. A question with several parts shows one row of options per part: pick in each, then send them together.
+
+Some things are left to the pane itself, behind an **Open pane** button: Codex questions with several parts, parts with no options to pick, and typed answers to those questions.
 
 ### Quick replies
 

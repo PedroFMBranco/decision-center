@@ -44,12 +44,30 @@ test('a waiting pane with question options in the hook file is a question', () =
   assert.equal(item?.kind, 'question')
   assert.deepEqual(item?.question, {
     title: 'Which color?',
+    header: 'Color',
     multiSelect: false,
     options: [
       { index: 1, label: 'Red', description: 'warm' },
       { index: 2, label: 'Blue' }
     ]
   })
+})
+
+test('a picker with several questions keeps the rest of them in order under `more`', () => {
+  const twoParts = JSON.stringify({
+    questions: [
+      { question: 'Which toppings?', header: 'Toppings', multiSelect: true, options: [{ label: 'Cheese' }, { label: 'Olive' }] },
+      { question: 'Which size?', header: 'Size', multiSelect: false, options: [{ label: 'Small' }] }
+    ]
+  })
+  const [item] = items([agent({ state: 'waiting' })], {
+    'tab:leaf': { entry: { paneKey: 'tab:leaf', payload: { state: 'waiting', interactivePrompt: twoParts } } }
+  })
+  assert.equal(item?.question?.title, 'Which toppings?')
+  assert.equal(item?.question?.multiSelect, true)
+  assert.deepEqual(item?.question?.more, [
+    { title: 'Which size?', header: 'Size', multiSelect: false, options: [{ index: 1, label: 'Small' }] }
+  ])
 })
 
 test('a waiting pane with an approval in the hook file is a permission ask', () => {

@@ -88,6 +88,16 @@ test('rejects a malformed reply', async () => {
   assert.equal(res.status, 400)
 })
 
+test('accepts permission and several-answer replies, and rejects malformed ones', async () => {
+  const post = (reply: unknown) => call('POST', '/api/reply', json, JSON.stringify({ id: 'tab:leaf', reply }))
+  assert.equal((await post({ type: 'permission', allow: true })).status, 200)
+  assert.equal((await post({ type: 'permission', allow: false, note: 'not now' })).status, 200)
+  assert.equal((await post({ type: 'answers', answers: [[2], [1, 3]] })).status, 200)
+  assert.equal((await post({ type: 'permission', allow: 'yes' })).status, 400)
+  assert.equal((await post({ type: 'answers', answers: [[2], []] })).status, 400)
+  assert.equal((await post({ type: 'shell', command: 'ls' })).status, 400)
+})
+
 test('marks an item read, and 404s an unknown one', async () => {
   assert.equal((await call('POST', '/api/read', json, JSON.stringify({ id: 'known' }))).status, 200)
   assert.equal((await call('POST', '/api/read', json, JSON.stringify({ id: 'gone' }))).status, 404)

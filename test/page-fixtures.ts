@@ -74,7 +74,14 @@ export function fixtureItems(now = Date.now()): FeedItem[] {
     item({
       id: 'q-parts', kind: 'question', worktreeName: 'v2-fe', title: 'rollout', since: now - 8 * MIN,
       lastMessage: 'Two decisions before the rollout.',
-      question: { title: 'Which tenant goes first? (+1 more)', multiSelect: false, options: [{ index: 1, label: 'Internal' }, { index: 2, label: 'Pilot' }] }
+      question: {
+        title: 'Which tenant goes first?', header: 'Tenant', multiSelect: false,
+        options: [{ index: 1, label: 'Internal' }, { index: 2, label: 'Pilot' }],
+        more: [
+          { title: 'Which checks gate it?', header: 'Checks', multiSelect: true, options: [{ index: 1, label: 'Smoke' }, { index: 2, label: 'Load test' }, { index: 3, label: 'Manual QA' }] },
+          { title: 'When?', header: 'When', multiSelect: false, options: [{ index: 1, label: 'Today' }, { index: 2, label: 'Monday' }] }
+        ]
+      }
     }, now),
     item({
       id: 'q-text', kind: 'question', agent: 'codex', state: 'done', worktreeName: 'legacy', title: 'naming', since: now - 9 * MIN,

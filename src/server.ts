@@ -75,15 +75,20 @@ function isReplyRequest(body: unknown): body is ReplyRequest {
     return false
   }
   const reply = candidate.reply
-  if (reply.type === 'text') {
-    return typeof reply.text === 'string' && reply.text.trim().length > 0
+  const isIndexes = (indexes: unknown) =>
+    Array.isArray(indexes) && indexes.length > 0 && indexes.every((index) => Number.isInteger(index) && index >= 1)
+  switch (reply.type) {
+    case 'text':
+      return typeof reply.text === 'string' && reply.text.trim().length > 0
+    case 'option':
+      return isIndexes(reply.indexes)
+    case 'answers':
+      return Array.isArray(reply.answers) && reply.answers.length > 0 && reply.answers.every(isIndexes)
+    case 'permission':
+      return typeof reply.allow === 'boolean' && (reply.note === undefined || typeof reply.note === 'string')
+    default:
+      return false
   }
-  return (
-    reply.type === 'option' &&
-    Array.isArray(reply.indexes) &&
-    reply.indexes.length > 0 &&
-    reply.indexes.every((index) => Number.isInteger(index) && index >= 1)
-  )
 }
 
 function isIdRequest(body: unknown): body is ReadRequest & OpenRequest {
@@ -164,7 +169,7 @@ export function startServer(deps: ServerDeps): Promise<DecisionCenterServer> {
       }
       if (path === '/api/reply') {
         if (!isReplyRequest(body)) {
-          sendError(res, 400, 'bad_request', 'expected { id, reply: { type: "text", text } | { type: "option", indexes } }')
+          sendError(res, 400, 'bad_request', 'expected { id, reply } with reply type text, option, answers or permission')
           return
         }
         const result = await deps.reply(body)
