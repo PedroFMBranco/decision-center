@@ -10,6 +10,10 @@ const NOW = 100 * 24 * HOUR
 
 const CLAUDE_ASK = ['╭───', ' Do you want to proceed?', ' ❯ 1. Yes', '   2. No', ' Esc to cancel · Tab to amend']
 const CLAUDE_COMPOSER = ['─'.repeat(20), '❯\xa0', '─'.repeat(20), '  ? for shortcuts']
+// As captured live after a deny, and while an allowed command still runs.
+const CLAUDE_DENIED = ['⏺ Bash(touch b.txt)', '  ⎿  Interrupted · What should Claude do instead?', '', '✻ Baked for 1s · done 3:18 PM', '', ...CLAUDE_COMPOSER]
+const CLAUDE_RUNNING = ['  ⎿  Interrupted · What should Claude do instead?', '✻ Baked for 1s · done 3:18 PM', '❯ run it again', '⏺ Bash(touch b.txt)', '  ⎿  Running…', '✳ Sprouting… (7s · ↓ 106 tokens)', ...CLAUDE_COMPOSER]
+const CODEX_DENIED = ['  └ (no output)', '', '■ Conversation interrupted - tell the model what to do differently. Something went wrong? Hit `/feedback` to', 'report the issue.', '', '› Ask Codex to do anything', '  GPT low · /proj']
 
 /** A store over fake sessions: set `sessions`, `screens` and `now`, then refresh. */
 function harness(stored: StoredFlags | null = { v: 1, installedAt: 0, sessions: {} }) {
@@ -150,22 +154,37 @@ test('flags of sessions gone for a week are forgotten', async () => {
   assert.deepEqual(Object.keys(world.stored?.sessions ?? {}), [])
 })
 
-test('an ask denied or cancelled in the pane without a hook becomes a finished item once the pane shows no prompt (fact 9)', async () => {
+test('an ask denied or cancelled in the pane without a hook becomes a finished item once the pane says interrupted (fact 9)', async () => {
   const { world, store } = harness()
   world.sessions = [s('a', { turn: 'working', pending: permissionAsk('touch b.txt', NOW - 4000) })]
   assert.deepEqual(ids(await store.refresh()), ['a:permission*'])
-  world.screen = CLAUDE_COMPOSER
+  world.screen = CLAUDE_DENIED
   const cancelled = await store.refresh()
   assert.deepEqual(ids(cancelled), ['a:finished*'])
   assert.equal(cancelled.items[0]?.since, NOW - 4000)
-  const sub = harness()
-  sub.world.screen = CLAUDE_COMPOSER
-  sub.world.sessions = [s('sub', { turn: 'working', pending: { ...permissionAsk('touch b.txt', NOW - 4000), actor: 'agent-1' } })]
-  assert.deepEqual(ids(await sub.store.refresh()), [])
-  world.sessions = [s('a', { pending: permissionAsk('touch b.txt', NOW - 4000) })]
-  assert.deepEqual(ids(await store.refresh()), ['a:finished*'])
   world.screen = CLAUDE_ASK
   assert.deepEqual(ids(await store.refresh()), ['a:permission*'])
+  const codex = harness()
+  codex.world.screen = CODEX_DENIED
+  codex.world.sessions = [s('c', { id: 'codex:c', agent: 'codex', turn: 'working', pending: permissionAsk('touch b.txt', NOW - 4000) })]
+  assert.deepEqual((await codex.store.refresh()).items.map((i) => i.kind), ['finished'])
+})
+
+test('an allowed ask whose command still runs is not a finished item', async () => {
+  const { world, store } = harness()
+  world.sessions = [s('a', { turn: 'working', pending: permissionAsk('touch b.txt', NOW - 4000) })]
+  world.screen = CLAUDE_RUNNING
+  assert.deepEqual(ids(await store.refresh()), [])
+  world.screen = CLAUDE_COMPOSER
+  assert.deepEqual(ids(await store.refresh()), [])
+  const sub = harness()
+  sub.world.screen = CLAUDE_DENIED
+  sub.world.sessions = [s('sub', { turn: 'working', pending: { ...permissionAsk('touch b.txt', NOW - 4000), actor: 'agent-1' } })]
+  assert.deepEqual(ids(await sub.store.refresh()), [])
+  const done = harness()
+  done.world.screen = CLAUDE_COMPOSER
+  done.world.sessions = [s('d', { pending: permissionAsk('touch b.txt', NOW - 4000) })]
+  assert.deepEqual(ids(await done.store.refresh()), ['d:finished*'])
 })
 
 test('the screen check keeps the ask when it is new, outside tmux, or the screen is unreadable', async () => {

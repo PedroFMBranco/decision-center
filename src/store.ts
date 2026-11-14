@@ -50,6 +50,27 @@ function askShown(agent: Session['agent'], lines: string[]): boolean {
     : codexPermissionFooter(lines) >= 0 || codexPickerFooter(lines) >= 0 || codexQuestionQueued(lines)
 }
 
+/** How many lines above the composer can hold the agent's "interrupted" notice. */
+const INTERRUPT_LINES = 4
+
+/**
+ * Whether the pane says the turn was interrupted, right above its composer.
+ * Claude: `⎿  Interrupted · What should Claude do instead?`. Codex:
+ * `■ Conversation interrupted - tell the model what to do differently.`
+ */
+function interruptedShown(agent: Session['agent'], lines: string[]): boolean {
+  const filled = lines.filter((line) => line.trim())
+  const composer =
+    agent === 'claude'
+      ? filled.findLastIndex((line, i) => line.startsWith('❯') && /^─{10,}$/.test((filled[i - 1] ?? '').trim())) - 1
+      : filled.findLastIndex((line) => /^›(\s|$)/.test(line))
+  if (composer < 0) {
+    return false
+  }
+  const notice = agent === 'claude' ? 'Interrupted ·' : 'Conversation interrupted'
+  return filled.slice(Math.max(0, composer - INTERRUPT_LINES), composer).some((line) => line.includes(notice))
+}
+
 /**
  * The feed: one item per live session that waits on you or finished its turn,
  * with read/dismissed flags kept across restarts (issue 0006).
@@ -121,19 +142,25 @@ export class FeedStore {
   }
 
   /**
-   * The session's ask, unless its pane shows none. Why: denying or cancelling
-   * an ask in the pane fires no hook (fact 9). Nothing is stored, so the next
-   * refresh checks again; an unreadable screen keeps the ask.
+   * The session's ask as its pane shows it. Why: denying or cancelling an ask
+   * in the pane fires no hook (fact 9). `gone` means the prompt left the screen;
+   * `interrupted` means the pane also says the turn was interrupted, which
+   * tells a denied ask from an allowed command that is still running. Nothing
+   * is stored, so the next refresh checks again; an unreadable screen keeps the ask.
    */
-  private async pendingShown(session: Session, now: number): Promise<Ask | null> {
+  private async askOnScreen(session: Session, now: number): Promise<'shown' | 'gone' | 'interrupted'> {
     const { pending, pane } = session
     if (!pending || !pane || pending.at > now - SILENT_CHECK_AFTER_MS) {
-      return pending
+      return 'shown'
     }
     try {
-      return askShown(session.agent, (await this.deps.screen(pane)).lines) ? pending : null
+      const { lines } = await this.deps.screen(pane)
+      if (askShown(session.agent, lines)) {
+        return 'shown'
+      }
+      return interruptedShown(session.agent, lines) ? 'interrupted' : 'gone'
     } catch {
-      return pending
+      return 'shown'
     }
   }
 
@@ -155,12 +182,13 @@ export class FeedStore {
     const next = new Map<string, FeedItem>()
     for (const session of view.live) {
       present.add(session.id)
-      const pending = await this.pendingShown(session, now)
+      const onScreen = await this.askOnScreen(session, now)
+      const pending = onScreen === 'shown' ? session.pending : null
       const codexQuestion =
         session.agent === 'codex' && !pending && session.turn === 'done' && session.transcriptPath
           ? await this.deps.codexQuestion(session.transcriptPath)
           : null
-      const cancelled = session.pending && !pending && !session.pending.actor && session.turn === 'working'
+      const cancelled = onScreen === 'interrupted' && session.pending && !session.pending.actor && session.turn === 'working'
       const item = itemFromSession(session, { pending, codexQuestion, ...(cancelled ? { cancelledAt: session.pending!.at } : {}) })
       if (item) {
         next.set(item.id, item)
