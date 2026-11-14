@@ -2,7 +2,7 @@
 
 // src/cli.ts
 import { execFile as execFile4, spawnSync } from "node:child_process";
-import { existsSync as existsSync2, readdirSync as readdirSync2, readFileSync } from "node:fs";
+import { existsSync as existsSync3, readdirSync as readdirSync2, readFileSync as readFileSync2 } from "node:fs";
 import { homedir as homedir3 } from "node:os";
 import { join as join9 } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -143,7 +143,8 @@ function runHook(agent) {
 
 // src/install.ts
 import { randomBytes } from "node:crypto";
-import { copyFile, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
+import { copyFile, mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join as join3 } from "node:path";
 var HOOK_EVENTS = {
   claude: ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "PostToolUseFailure", "Stop", "StopFailure", "SessionEnd"],
@@ -154,6 +155,30 @@ var MARKER = "# decision-center hook";
 var quote = (text2) => `'${text2.replace(/'/g, `'\\''`)}'`;
 function hookCommand(node, hookPath, agent) {
   return `${quote(node)} ${quote(hookPath)} ${agent} ${MARKER}`;
+}
+function parseHookCommand(command) {
+  const match = /^'((?:[^']|'\\'')*)' '((?:[^']|'\\'')*)' /.exec(command);
+  const plain = (text2) => text2.replace(/'\\''/g, "'");
+  return match ? { node: plain(match[1]), hookPath: plain(match[2]) } : null;
+}
+var HOOK_FILE = "hook.mjs";
+async function placeHook(builtHook, home) {
+  const target = join3(home, HOOK_FILE);
+  const built = await readFile(builtHook);
+  const current = await readFile(target).catch(() => null);
+  if (!current?.equals(built)) {
+    await mkdir(home, { recursive: true, mode: 448 });
+    const temp = join3(home, `.${HOOK_FILE}.${randomBytes(6).toString("hex")}.tmp`);
+    await writeFile(temp, built, { mode: 420 });
+    await rename(temp, target);
+  }
+  return target;
+}
+async function removeHook(home) {
+  await rm(join3(home, HOOK_FILE), { force: true });
+}
+function placedHookPath(home) {
+  return join3(home, HOOK_FILE);
 }
 function isOurs(hook) {
   const command = hook?.command;
@@ -268,6 +293,35 @@ function installedEvents(text2) {
     return [];
   }
 }
+function hookProblems(text2, builtHook) {
+  let hooks2 = {};
+  try {
+    hooks2 = JSON.parse(text2 ?? "").hooks ?? {};
+  } catch {
+    return [];
+  }
+  const commands = /* @__PURE__ */ new Set();
+  for (const groups of Object.values(hooks2)) {
+    for (const group of Array.isArray(groups) ? groups : []) {
+      for (const hook of Array.isArray(group?.hooks) ? group.hooks : []) {
+        if (isOurs(hook)) commands.add(hook.command);
+      }
+    }
+  }
+  const built = existsSync(builtHook) ? readFileSync(builtHook) : null;
+  const problems = /* @__PURE__ */ new Set();
+  for (const command of commands) {
+    const parsed = parseHookCommand(command);
+    if (!parsed) {
+      problems.add("the hook command has an unknown shape");
+      continue;
+    }
+    if (!existsSync(parsed.node)) problems.add(`node is gone from ${parsed.node}`);
+    if (!existsSync(parsed.hookPath)) problems.add(`the hook file is gone from ${parsed.hookPath}`);
+    else if (built && !readFileSync(parsed.hookPath).equals(built)) problems.add(`the hook file at ${parsed.hookPath} differs from this build`);
+  }
+  return [...problems];
+}
 
 // src/main.ts
 import { mkdirSync as mkdirSync2, watch } from "node:fs";
@@ -367,7 +421,7 @@ function bindCodex(input) {
 
 // src/claude.ts
 import { execFile as execFile2 } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync as existsSync2 } from "node:fs";
 import { homedir as homedir2, tmpdir } from "node:os";
 import { join as join4 } from "node:path";
 function resolveClaudeBin() {
@@ -377,7 +431,7 @@ function resolveClaudeBin() {
     "/opt/homebrew/bin/claude",
     "/usr/local/bin/claude"
   ];
-  return candidates.find((path) => existsSync(path)) ?? "claude";
+  return candidates.find((path) => existsSync2(path)) ?? "claude";
 }
 function claudePrint(input, options) {
   const env = { ...process.env };
@@ -1569,7 +1623,7 @@ function viewSessions(sessions, alive) {
 
 // src/storage.ts
 import { randomBytes as randomBytes2 } from "node:crypto";
-import { mkdir, readFile as readFile2, rename as rename2, writeFile as writeFile2 } from "node:fs/promises";
+import { mkdir as mkdir2, readFile as readFile2, rename as rename2, writeFile as writeFile2 } from "node:fs/promises";
 import { dirname as dirname2, join as join6 } from "node:path";
 function jsonFile(path) {
   return {
@@ -1584,7 +1638,7 @@ function jsonFile(path) {
       }
     },
     async save(value) {
-      await mkdir(dirname2(path), { recursive: true, mode: 448 });
+      await mkdir2(dirname2(path), { recursive: true, mode: 448 });
       const temp = join6(dirname2(path), `.${randomBytes2(6).toString("hex")}.tmp`);
       await writeFile2(temp, `${JSON.stringify(value, null, 2)}
 `, { mode: 384 });
@@ -2162,7 +2216,7 @@ function targetsFrom(args) {
 
 ${USAGE}`);
   }
-  return { targets: named.length ? named : DEFAULT_TARGETS, dryRun };
+  return { targets: named.length ? named : DEFAULT_TARGETS, dryRun, everyFile: !named.length };
 }
 var AGENT_NAME = { claude: "Claude Code", codex: "Codex" };
 function report(results, targets) {
@@ -2178,15 +2232,20 @@ function report(results, targets) {
     console.log(line);
   });
 }
+var BUILT_HOOK = fileURLToPath(new URL("./hook.mjs", import.meta.url));
 async function hooks(args, install) {
-  const { targets, dryRun } = targetsFrom(args);
-  const hookPath = fileURLToPath(new URL("./hook.mjs", import.meta.url));
-  if (install && !existsSync2(hookPath)) {
-    throw new Error(`${hookPath} is missing. Run npm run build first.`);
+  const { targets, dryRun, everyFile } = targetsFrom(args);
+  if (install && !existsSync3(BUILT_HOOK)) {
+    throw new Error(`${BUILT_HOOK} is missing. Run npm run build first.`);
   }
+  const home = homeDir();
+  const hookPath = install && !dryRun ? await placeHook(BUILT_HOOK, home) : placedHookPath(home);
   const command = install ? (agent) => hookCommand(process.execPath, hookPath, agent) : null;
   const results = await applyHooks(targets, command, { dryRun });
   report(results, targets);
+  if (!install && !dryRun && everyFile) {
+    await removeHook(home);
+  }
   if (install && !dryRun && results.some((result) => result.status === "changed" && targets[results.indexOf(result)].agent === "codex")) {
     console.log("Codex asks you to trust new or changed hooks the next time it starts. Untrusted hooks do not run.");
   }
@@ -2194,14 +2253,17 @@ async function hooks(args, install) {
 async function status() {
   const home = homeDir();
   const dir = sessionsDir(home);
-  const files = existsSync2(dir) ? readdirSync2(dir).filter((name) => name.endsWith(".jsonl")) : [];
-  console.log(`Home: ${home}${existsSync2(home) ? "" : " (not created yet)"}`);
+  const files = existsSync3(dir) ? readdirSync2(dir).filter((name) => name.endsWith(".jsonl")) : [];
+  console.log(`Home: ${home}${existsSync3(home) ? "" : " (not created yet)"}`);
   console.log(`Sessions seen: ${files.length} (${files.filter((f) => f.startsWith("claude-")).length} Claude, ${files.filter((f) => f.startsWith("codex-")).length} Codex)`);
   for (const { agent, path } of DEFAULT_TARGETS) {
-    const text2 = existsSync2(path) ? readFileSync(path, "utf8") : null;
+    const text2 = existsSync3(path) ? readFileSync2(path, "utf8") : null;
     const events = installedEvents(text2);
     const missing = HOOK_EVENTS[agent].filter((event) => !events.includes(event));
     console.log(`${AGENT_NAME[agent]} hooks: ${!events.length ? "not installed" : missing.length ? `partly installed, missing ${missing.join(", ")}` : "installed"} (${path})`);
+    for (const problem of hookProblems(text2, BUILT_HOOK)) {
+      console.log(`  Not recording: ${problem}. Run install again.`);
+    }
   }
   const tmux2 = spawnSync("tmux", ["-V"], { encoding: "utf8" });
   console.log(`tmux: ${tmux2.status === 0 ? tmux2.stdout.trim() : "not found"}`);

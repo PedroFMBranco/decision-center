@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { applyHooks, hookCommand, installedEvents, HOOK_EVENTS } from '../src/install.ts'
+import { applyHooks, hookCommand, installedEvents, parseHookCommand, HOOK_EVENTS } from '../src/install.ts'
 
 const CLI = new URL('../dist/decision-center.mjs', import.meta.url).pathname
 const command = (agent: 'claude' | 'codex') => hookCommand('/usr/bin/node', "/code/it's here/dist/hook.mjs", agent)
@@ -143,3 +143,38 @@ test('the CLI touches only the file a path flag names, and the default files und
     assert.equal(cli('uninstall').status, 0)
     assert.equal(readFileSync(join(dir, '.codex', 'hooks.json'), 'utf8'), CODEX_HOOKS)
   }))
+
+test('the installed hook is a copy in the home folder that records without the checkout, and status says when it is gone', () =>
+  withDir((dir) => {
+    mkdirSync(join(dir, '.claude'))
+    const env = { HOME: dir, PATH: process.env.PATH ?? '' }
+    const cli = (...args: string[]) => spawnSync(process.execPath, [CLI, ...args], { env, encoding: 'utf8' })
+    assert.equal(cli('install', '--dry-run').status, 0)
+    assert.equal(existsSync(join(dir, '.decision-center')), false)
+    assert.equal(cli('install').status, 0)
+    const settings = JSON.parse(readFileSync(join(dir, '.claude', 'settings.json'), 'utf8'))
+    const installed: string = settings.hooks.Stop[0].hooks[0].command
+    const copy = join(dir, '.decision-center', 'hook.mjs')
+    assert.deepEqual(parseHookCommand(installed), { node: process.execPath, hookPath: copy })
+    const run = spawnSync('/bin/sh', ['-c', installed], {
+      input: JSON.stringify({ session_id: 'abc', cwd: '/c', hook_event_name: 'Stop', last_assistant_message: 'ok' }),
+      env,
+      encoding: 'utf8'
+    })
+    assert.deepEqual([run.status, run.stdout], [0, ''])
+    assert.equal(existsSync(join(dir, '.decision-center', 'sessions', 'claude-abc.jsonl')), true)
+    assert.doesNotMatch(cli('status').stdout, /Not recording/)
+    writeFileSync(copy, 'older build')
+    assert.match(cli('status').stdout, /Not recording: the hook file at .*hook\.mjs differs from this build\. Run install again\./)
+    rmSync(copy)
+    assert.match(cli('status').stdout, /Not recording: the hook file is gone from .*hook\.mjs\. Run install again\./)
+    assert.equal(cli('install').status, 0)
+    assert.doesNotMatch(cli('status').stdout, /Not recording/)
+    assert.equal(cli('uninstall').status, 0)
+    assert.equal(existsSync(copy), false)
+  }))
+
+test('a hook command gives back the paths it was built from', () => {
+  assert.deepEqual(parseHookCommand(command('claude')), { node: '/usr/bin/node', hookPath: "/code/it's here/dist/hook.mjs" })
+  assert.equal(parseHookCommand('decision-center hook claude'), null)
+})

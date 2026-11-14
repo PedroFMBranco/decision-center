@@ -1,7 +1,8 @@
 // Merges Decision Center's hook entries into an agent's hook config file.
 // Every other entry stays in place and in order.
 import { randomBytes } from 'node:crypto'
-import { copyFile, readFile, realpath, rename, stat, writeFile } from 'node:fs/promises'
+import { existsSync, readFileSync } from 'node:fs'
+import { copyFile, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import type { AgentType } from './contract.ts'
 
@@ -20,6 +21,40 @@ const quote = (text: string) => `'${text.replace(/'/g, `'\\''`)}'`
  */
 export function hookCommand(node: string, hookPath: string, agent: AgentType): string {
   return `${quote(node)} ${quote(hookPath)} ${agent} ${MARKER}`
+}
+
+/** The node and hook paths in one of our commands, or null when it has another shape. */
+export function parseHookCommand(command: string): { node: string; hookPath: string } | null {
+  const match = /^'((?:[^']|'\\'')*)' '((?:[^']|'\\'')*)' /.exec(command)
+  const plain = (text: string) => text.replace(/'\\''/g, "'")
+  return match ? { node: plain(match[1]!), hookPath: plain(match[2]!) } : null
+}
+
+const HOOK_FILE = 'hook.mjs'
+
+/**
+ * Copies the built hook into the home folder and returns the copy's path.
+ * Why a copy: the agents' config then names a path that outlives the checkout.
+ */
+export async function placeHook(builtHook: string, home: string): Promise<string> {
+  const target = join(home, HOOK_FILE)
+  const built = await readFile(builtHook)
+  const current = await readFile(target).catch(() => null)
+  if (!current?.equals(built)) {
+    await mkdir(home, { recursive: true, mode: 0o700 })
+    const temp = join(home, `.${HOOK_FILE}.${randomBytes(6).toString('hex')}.tmp`)
+    await writeFile(temp, built, { mode: 0o644 })
+    await rename(temp, target)
+  }
+  return target
+}
+
+export async function removeHook(home: string): Promise<void> {
+  await rm(join(home, HOOK_FILE), { force: true })
+}
+
+export function placedHookPath(home: string): string {
+  return join(home, HOOK_FILE)
 }
 
 export function isOurs(hook: unknown): boolean {
@@ -174,4 +209,35 @@ export function installedEvents(text: string | null): string[] {
   } catch {
     return []
   }
+}
+
+/** What stops the installed hook commands in a config file's text from recording. */
+export function hookProblems(text: string | null, builtHook: string): string[] {
+  let hooks: Record<string, Group[]> = {}
+  try {
+    hooks = (JSON.parse(text ?? '') as { hooks?: Record<string, Group[]> }).hooks ?? {}
+  } catch {
+    return []
+  }
+  const commands = new Set<string>()
+  for (const groups of Object.values(hooks)) {
+    for (const group of Array.isArray(groups) ? groups : []) {
+      for (const hook of Array.isArray(group?.hooks) ? group.hooks : []) {
+        if (isOurs(hook)) commands.add((hook as { command: string }).command)
+      }
+    }
+  }
+  const built = existsSync(builtHook) ? readFileSync(builtHook) : null
+  const problems = new Set<string>()
+  for (const command of commands) {
+    const parsed = parseHookCommand(command)
+    if (!parsed) {
+      problems.add('the hook command has an unknown shape')
+      continue
+    }
+    if (!existsSync(parsed.node)) problems.add(`node is gone from ${parsed.node}`)
+    if (!existsSync(parsed.hookPath)) problems.add(`the hook file is gone from ${parsed.hookPath}`)
+    else if (built && !readFileSync(parsed.hookPath).equals(built)) problems.add(`the hook file at ${parsed.hookPath} differs from this build`)
+  }
+  return [...problems]
 }

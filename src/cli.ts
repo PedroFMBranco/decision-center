@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { DEFAULT_PORT, type AgentType } from './contract.ts'
 import { runHook } from './hook.ts'
 import { homeDir, sessionsDir } from './home.ts'
-import { applyHooks, hookCommand, installedEvents, HOOK_EVENTS, type FileResult, type InstallTarget } from './install.ts'
+import { applyHooks, hookCommand, hookProblems, installedEvents, placedHookPath, placeHook, removeHook, HOOK_EVENTS, type FileResult, type InstallTarget } from './install.ts'
 import { serve } from './main.ts'
 
 const USAGE = `Usage: decision-center <command>
@@ -36,7 +36,7 @@ const DEFAULT_TARGETS: InstallTarget[] = [
 ]
 
 /** With a path flag, only the files named are touched. */
-function targetsFrom(args: string[]): { targets: InstallTarget[]; dryRun: boolean } {
+function targetsFrom(args: string[]): { targets: InstallTarget[]; dryRun: boolean; everyFile: boolean } {
   const named: InstallTarget[] = []
   let dryRun = false
   for (let i = 0; i < args.length; i++) {
@@ -48,7 +48,7 @@ function targetsFrom(args: string[]): { targets: InstallTarget[]; dryRun: boolea
       named.push({ agent: arg === '--claude-settings' ? 'claude' : 'codex', path })
     } else throw new Error(`unknown option ${arg}\n\n${USAGE}`)
   }
-  return { targets: named.length ? named : DEFAULT_TARGETS, dryRun }
+  return { targets: named.length ? named : DEFAULT_TARGETS, dryRun, everyFile: !named.length }
 }
 
 const AGENT_NAME: Record<AgentType, string> = { claude: 'Claude Code', codex: 'Codex' }
@@ -67,15 +67,21 @@ function report(results: FileResult[], targets: InstallTarget[]): void {
   })
 }
 
+const BUILT_HOOK = fileURLToPath(new URL('./hook.mjs', import.meta.url))
+
 async function hooks(args: string[], install: boolean): Promise<void> {
-  const { targets, dryRun } = targetsFrom(args)
-  const hookPath = fileURLToPath(new URL('./hook.mjs', import.meta.url))
-  if (install && !existsSync(hookPath)) {
-    throw new Error(`${hookPath} is missing. Run npm run build first.`)
+  const { targets, dryRun, everyFile } = targetsFrom(args)
+  if (install && !existsSync(BUILT_HOOK)) {
+    throw new Error(`${BUILT_HOOK} is missing. Run npm run build first.`)
   }
+  const home = homeDir()
+  const hookPath = install && !dryRun ? await placeHook(BUILT_HOOK, home) : placedHookPath(home)
   const command = install ? (agent: AgentType) => hookCommand(process.execPath, hookPath, agent) : null
   const results = await applyHooks(targets, command, { dryRun })
   report(results, targets)
+  if (!install && !dryRun && everyFile) {
+    await removeHook(home)
+  }
   if (install && !dryRun && results.some((result) => result.status === 'changed' && targets[results.indexOf(result)]!.agent === 'codex')) {
     console.log('Codex asks you to trust new or changed hooks the next time it starts. Untrusted hooks do not run.')
   }
@@ -92,6 +98,9 @@ async function status(): Promise<void> {
     const events = installedEvents(text)
     const missing = HOOK_EVENTS[agent].filter((event) => !events.includes(event))
     console.log(`${AGENT_NAME[agent]} hooks: ${!events.length ? 'not installed' : missing.length ? `partly installed, missing ${missing.join(', ')}` : 'installed'} (${path})`)
+    for (const problem of hookProblems(text, BUILT_HOOK)) {
+      console.log(`  Not recording: ${problem}. Run install again.`)
+    }
   }
   const tmux = spawnSync('tmux', ['-V'], { encoding: 'utf8' })
   console.log(`tmux: ${tmux.status === 0 ? tmux.stdout.trim() : 'not found'}`)
