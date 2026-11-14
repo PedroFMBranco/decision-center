@@ -61,6 +61,10 @@ The session runs on a tmux server of its own, named `decision-center`, so your o
 
 Closing the terminal window ends the session.
 
+Only a call that opens a session goes through tmux. A piped call, a print or version flag (`claude -p`, `--version`, `--help`) and a subcommand (`claude mcp list`, `codex exec`) run as they are, so their output stays on screen.
+
+To make plain `claude` and `codex` start this way, run `decision-center install --alias`. It adds two shell functions, in a marked block, to `~/.zshrc` and to `~/.bashrc` when you have one, and backs each file up first. The functions run the agent as it is when Node or this folder is gone. `uninstall` removes the block. Without `--alias`, `install` edits no shell file.
+
 ### Sessions outside tmux
 
 Hooks fire in every terminal, so these sessions still show up in the feed. Replies and **Open pane** are refused with "this session is not running in tmux; reply in its terminal".

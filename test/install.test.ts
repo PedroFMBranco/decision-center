@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { applyHooks, hookCommand, installedEvents, parseHookCommand, HOOK_EVENTS } from '../src/install.ts'
+import { applyHooks, hasShellBlock, hookCommand, installedEvents, parseHookCommand, shellBlock, updateShellFile, HOOK_EVENTS } from '../src/install.ts'
 
 const CLI = new URL('../dist/decision-center.mjs', import.meta.url).pathname
 const command = (agent: 'claude' | 'codex') => hookCommand('/usr/bin/node', "/code/it's here/dist/hook.mjs", agent)
@@ -178,3 +178,67 @@ test('a hook command gives back the paths it was built from', () => {
   assert.deepEqual(parseHookCommand(command('claude')), { node: '/usr/bin/node', hookPath: "/code/it's here/dist/hook.mjs" })
   assert.equal(parseHookCommand('decision-center hook claude'), null)
 })
+
+test('the shell block is added once, replaced in place, and removed leaving the file byte for byte', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dc-shell-'))
+  try {
+    const rc = join(dir, '.zshrc')
+    for (const original of ['export A=1\nalias ll="ls -l"\n', 'export A=1', '']) {
+      writeFileSync(rc, original)
+      const first = shellBlock('/old/node', '/old/cli.mjs')
+      assert.equal((await updateShellFile(rc, first, { dryRun: true })).status, 'would-change')
+      assert.equal(readFileSync(rc, 'utf8'), original)
+      assert.equal((await updateShellFile(rc, first, { dryRun: false })).status, 'changed')
+      assert.equal((await updateShellFile(rc, first, { dryRun: false })).status, 'unchanged')
+      writeFileSync(rc, `${readFileSync(rc, 'utf8')}export AFTER=1\n`)
+      const second = shellBlock('/new/node', "/it's/cli.mjs")
+      assert.equal((await updateShellFile(rc, second, { dryRun: false })).status, 'changed')
+      const text = readFileSync(rc, 'utf8')
+      assert.equal(text.split('# >>> decision-center >>>').length, 2)
+      assert.equal(text.includes('/old/node'), false)
+      assert.equal(text.startsWith(original), true)
+      assert.equal(text.endsWith('export AFTER=1\n'), true)
+      assert.equal((await updateShellFile(rc, null, { dryRun: false })).status, 'changed')
+      assert.equal(hasShellBlock(readFileSync(rc, 'utf8')), false)
+      assert.equal(readFileSync(rc, 'utf8').replace(/\n*export AFTER=1\n$/, ''), original.replace(/\n$/, ''))
+      assert.equal((await updateShellFile(rc, null, { dryRun: false })).status, 'unchanged')
+    }
+    rmSync(rc)
+    assert.equal((await updateShellFile(rc, null, { dryRun: false })).status, 'unchanged')
+    assert.equal(existsSync(rc), false)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('the shell functions go through run, and fall back to the agent when the program is gone', () =>
+  withDir((dir) => {
+    const bin = join(dir, 'bin')
+    mkdirSync(bin)
+    writeFileSync(join(bin, 'claude'), '#!/bin/sh\necho "real claude $*"\n', { mode: 0o755 })
+    const fakeCli = join(dir, 'cli.mjs')
+    writeFileSync(fakeCli, 'console.log("via", process.argv.slice(2).join(" "))\n')
+    const sh = (block: string) => spawnSync('/bin/sh', ['-c', `${block}\nclaude --model 'o p'`], { env: { PATH: `${bin}:/usr/bin:/bin` }, encoding: 'utf8' }).stdout
+    assert.equal(sh(shellBlock(process.execPath, fakeCli)), 'via run claude --model o p\n')
+    assert.equal(sh(shellBlock(process.execPath, join(dir, 'gone.mjs'))), 'real claude --model o p\n')
+    assert.equal(sh(shellBlock(join(dir, 'no-node'), fakeCli)), 'real claude --model o p\n')
+  }))
+
+test('install edits a shell file only with --alias, and uninstall takes the functions out', () =>
+  withDir((dir) => {
+    mkdirSync(join(dir, '.claude'))
+    const rc = join(dir, '.zshrc')
+    writeFileSync(rc, 'export A=1\n')
+    const cli = (...args: string[]) => spawnSync(process.execPath, [CLI, ...args], { env: { HOME: dir, PATH: process.env.PATH ?? '', SHELL: '/bin/zsh' }, encoding: 'utf8' })
+    assert.match(cli('install').stdout, /run install --alias/)
+    assert.equal(readFileSync(rc, 'utf8'), 'export A=1\n')
+    assert.match(cli('install', '--alias', '--dry-run').stdout, /would have added/)
+    assert.equal(readFileSync(rc, 'utf8'), 'export A=1\n')
+    assert.match(cli('install', '--alias').stdout, /added the claude and codex functions to .*\.zshrc/)
+    assert.equal(hasShellBlock(readFileSync(rc, 'utf8')), true)
+    assert.match(cli('status').stdout, /Shell functions: installed/)
+    assert.doesNotMatch(cli('install').stdout, /install --alias/)
+    assert.equal(cli('uninstall').status, 0)
+    assert.equal(readFileSync(rc, 'utf8'), 'export A=1\n')
+    assert.match(cli('status').stdout, /Shell functions: not installed/)
+  }))

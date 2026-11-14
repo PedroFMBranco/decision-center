@@ -322,6 +322,50 @@ function hookProblems(text2, builtHook) {
   }
   return [...problems];
 }
+var BLOCK_START = "# >>> decision-center >>>";
+var BLOCK_END = "# <<< decision-center <<<";
+var BLOCK = new RegExp(`\\n?${BLOCK_START}\\n[\\s\\S]*?${BLOCK_END}\\n?`);
+function shellBlock(node, cli) {
+  const fn = (agent) => `${agent}() { if [ -x ${quote(node)} ] && [ -f ${quote(cli)} ]; then ${quote(node)} ${quote(cli)} run ${agent} "$@"; else command ${agent} "$@"; fi; }`;
+  return [BLOCK_START, "# Added by `decision-center install --alias`. `decision-center uninstall` removes it.", fn("claude"), fn("codex"), BLOCK_END].join("\n");
+}
+function hasShellBlock(text2) {
+  return BLOCK.test(text2 ?? "");
+}
+async function updateShellFile(path, block, options) {
+  const target = await realpath(path).catch(() => path);
+  const text2 = await readFile(target, "utf8").catch((error) => {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  });
+  const current = text2 ?? "";
+  let next;
+  if (BLOCK.test(current)) {
+    next = current.replace(BLOCK, (match) => block ? `${match.startsWith("\n") ? "\n" : ""}${block}
+` : "");
+  } else {
+    next = block ? `${current}${current && !current.endsWith("\n") ? "\n" : ""}${current ? "\n" : ""}${block}
+` : current;
+  }
+  if (next === current) {
+    return { path, status: "unchanged" };
+  }
+  if (options.dryRun) {
+    return { path, status: "would-change" };
+  }
+  let backup;
+  let mode = 420;
+  if (text2 !== null) {
+    const stamp = (options.now ?? /* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
+    backup = join3(dirname(target), `${basename(target)}.decision-center-backup-${stamp}`);
+    await copyFile(target, backup);
+    mode = (await stat(target)).mode & 511;
+  }
+  const temp = join3(dirname(target), `.${basename(target)}.${randomBytes(6).toString("hex")}.tmp`);
+  await writeFile(temp, next, { mode });
+  await rename(temp, target);
+  return { path, status: "changed", ...backup ? { backup } : {} };
+}
 
 // src/main.ts
 import { mkdirSync as mkdirSync2, watch } from "node:fs";
@@ -2220,17 +2264,24 @@ function runArgs(command, context) {
     `exec ${command.map(quote2).join(" ")}`
   ];
 }
+var PRINTS_AND_EXITS = /* @__PURE__ */ new Set(["-p", "--print", "-v", "-V", "--version", "-h", "--help", "--bg"]);
+var SESSION_SUBCOMMANDS = /* @__PURE__ */ new Set(["attach", "resume", "fork"]);
+function opensSession(args, io) {
+  if (!io.stdinTty || !io.stdoutTty) return false;
+  const first = args[0] ?? "";
+  if (/^[a-z][a-z-]*$/.test(first) && !SESSION_SUBCOMMANDS.has(first)) return false;
+  const flags = args.includes("--") ? args.slice(0, args.indexOf("--")) : args;
+  return !flags.some((arg) => PRINTS_AND_EXITS.has(arg));
+}
 function run2(command) {
   if (!command.length) {
     throw new Error("run needs a command, for example: decision-center run claude");
   }
-  if (process.env.TMUX) {
+  const io = { stdinTty: process.stdin.isTTY === true, stdoutTty: process.stdout.isTTY === true };
+  if (process.env.TMUX || !opensSession(command.slice(1), io)) {
     const direct = spawnSync(command[0], command.slice(1), { stdio: "inherit" });
     if (direct.error) throw new Error(`couldn't start ${command[0]}: ${direct.error.message}`);
     return direct.status ?? 1;
-  }
-  if (!process.stdin.isTTY) {
-    throw new Error("run needs a terminal");
   }
   const args = runArgs(command, { env: process.env, cwd: process.cwd(), platform: process.platform, id: randomBytes3(2).toString("hex") });
   const tmux2 = spawnSync("tmux", args, { stdio: "inherit" });
@@ -2247,8 +2298,10 @@ var USAGE = `Usage: decision-center <command>
   open                  Open the feed in your browser.
   run <agent> [args]    Start an agent inside tmux, from any terminal, so the
                         feed can reply to it. Example: decision-center run claude
-  install [--dry-run] [--claude-settings <path>] [--codex-hooks <path>]
-                        Add the hooks to Claude Code and Codex.
+  install [--dry-run] [--alias] [--claude-settings <path>] [--codex-hooks <path>]
+                        Add the hooks to Claude Code and Codex. With --alias,
+                        also make claude and codex start through run, by
+                        adding two functions to your zsh or bash startup file.
   uninstall [--dry-run] [--claude-settings <path>] [--codex-hooks <path>]
                         Remove the hooks again.
   status                Show the home folder, hooks, sessions and tmux.
@@ -2267,9 +2320,11 @@ var DEFAULT_TARGETS = [
 function targetsFrom(args) {
   const named = [];
   let dryRun = false;
+  let alias = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--dry-run") dryRun = true;
+    else if (arg === "--alias") alias = true;
     else if (arg === "--claude-settings" || arg === "--codex-hooks") {
       const path = args[++i];
       if (!path) throw new Error(`${arg} needs a path`);
@@ -2278,7 +2333,7 @@ function targetsFrom(args) {
 
 ${USAGE}`);
   }
-  return { targets: named.length ? named : DEFAULT_TARGETS, dryRun, everyFile: !named.length };
+  return { targets: named.length ? named : DEFAULT_TARGETS, dryRun, everyFile: !named.length, alias };
 }
 var AGENT_NAME = { claude: "Claude Code", codex: "Codex" };
 function report(results, targets) {
@@ -2294,9 +2349,39 @@ function report(results, targets) {
     console.log(line);
   });
 }
+function shellFiles() {
+  const shell = process.env.SHELL ?? "";
+  const zsh = join9(process.env.ZDOTDIR || homedir3(), ".zshrc");
+  const bash = join9(homedir3(), ".bashrc");
+  return [...existsSync3(zsh) || shell.endsWith("zsh") ? [zsh] : [], ...existsSync3(bash) || shell.endsWith("bash") ? [bash] : []];
+}
+async function shellFunctions(add, dryRun) {
+  const block = add ? shellBlock(process.execPath, fileURLToPath(import.meta.url)) : null;
+  const files = shellFiles();
+  if (add && !files.length) {
+    console.log(`Shell: found no zsh or bash startup file. Add this to your shell's startup file yourself:
+${block}`);
+    return;
+  }
+  for (const path of files) {
+    const result = await updateShellFile(path, block, { dryRun });
+    const did = add ? "added the claude and codex functions to" : "removed the claude and codex functions from";
+    const line = {
+      unchanged: add ? `Shell: ${path} is already up to date.` : null,
+      changed: `Shell: ${did} ${path}. Backup: ${result.backup ?? "none, the file is new"}.${add ? " Open a new terminal window to use them." : ""}`,
+      "would-change": `Shell: would have ${did} ${path}.`
+    }[result.status];
+    if (line) console.log(line);
+  }
+}
 var BUILT_HOOK = fileURLToPath(new URL("./hook.mjs", import.meta.url));
 async function hooks(args, install) {
-  const { targets, dryRun, everyFile } = targetsFrom(args);
+  const { targets, dryRun, everyFile, alias } = targetsFrom(args);
+  if (alias && !install) {
+    throw new Error(`uninstall takes no --alias; it removes the functions on its own
+
+${USAGE}`);
+  }
   if (install && !existsSync3(BUILT_HOOK)) {
     throw new Error(`${BUILT_HOOK} is missing. Run npm run build first.`);
   }
@@ -2307,6 +2392,11 @@ async function hooks(args, install) {
   report(results, targets);
   if (!install && !dryRun && everyFile) {
     await removeHook(home);
+  }
+  if (alias || !install && everyFile) {
+    await shellFunctions(install, dryRun);
+  } else if (install && !shellFiles().some((path) => existsSync3(path) && hasShellBlock(readFileSync2(path, "utf8")))) {
+    console.log("Replies reach agents started with `decision-center run claude`. To make plain `claude` and `codex` start that way, run install --alias.");
   }
   if (install && !dryRun && results.some((result) => result.status === "changed" && targets[results.indexOf(result)].agent === "codex")) {
     console.log("Codex asks you to trust new or changed hooks the next time it starts. Untrusted hooks do not run.");
@@ -2327,6 +2417,8 @@ async function status() {
       console.log(`  Not recording: ${problem}. Run install again.`);
     }
   }
+  const withFunctions = shellFiles().filter((path) => existsSync3(path) && hasShellBlock(readFileSync2(path, "utf8")));
+  console.log(`Shell functions: ${withFunctions.length ? `installed (${withFunctions.join(", ")})` : "not installed, so start agents with `decision-center run claude`"}`);
   const tmux2 = spawnSync2("tmux", ["-V"], { encoding: "utf8" });
   console.log(`tmux: ${tmux2.status === 0 ? tmux2.stdout.trim() : "not found"}`);
   const health = await fetch(`${feedUrl()}api/health`).then((res) => res.ok).catch(() => false);

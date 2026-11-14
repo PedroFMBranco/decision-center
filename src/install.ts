@@ -241,3 +241,61 @@ export function hookProblems(text: string | null, builtHook: string): string[] {
   }
   return [...problems]
 }
+
+const BLOCK_START = '# >>> decision-center >>>'
+const BLOCK_END = '# <<< decision-center <<<'
+const BLOCK = new RegExp(`\\n?${BLOCK_START}\\n[\\s\\S]*?${BLOCK_END}\\n?`)
+
+/**
+ * Shell functions that start `claude` and `codex` through `run`. When node or
+ * the program is gone, they run the agent as it is.
+ */
+export function shellBlock(node: string, cli: string): string {
+  const fn = (agent: AgentType) =>
+    `${agent}() { if [ -x ${quote(node)} ] && [ -f ${quote(cli)} ]; then ${quote(node)} ${quote(cli)} run ${agent} "$@"; else command ${agent} "$@"; fi; }`
+  return [BLOCK_START, '# Added by `decision-center install --alias`. `decision-center uninstall` removes it.', fn('claude'), fn('codex'), BLOCK_END].join('\n')
+}
+
+export function hasShellBlock(text: string | null): boolean {
+  return BLOCK.test(text ?? '')
+}
+
+export interface ShellResult {
+  path: string
+  status: 'unchanged' | 'changed' | 'would-change'
+  backup?: string
+}
+
+/** Puts `block` in a shell startup file, replacing an older one, or with null takes it out. */
+export async function updateShellFile(path: string, block: string | null, options: { dryRun: boolean; now?: Date }): Promise<ShellResult> {
+  const target = await realpath(path).catch(() => path)
+  const text = await readFile(target, 'utf8').catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return null
+    throw error
+  })
+  const current = text ?? ''
+  let next: string
+  if (BLOCK.test(current)) {
+    next = current.replace(BLOCK, (match) => (block ? `${match.startsWith('\n') ? '\n' : ''}${block}\n` : ''))
+  } else {
+    next = block ? `${current}${current && !current.endsWith('\n') ? '\n' : ''}${current ? '\n' : ''}${block}\n` : current
+  }
+  if (next === current) {
+    return { path, status: 'unchanged' }
+  }
+  if (options.dryRun) {
+    return { path, status: 'would-change' }
+  }
+  let backup: string | undefined
+  let mode = 0o644
+  if (text !== null) {
+    const stamp = (options.now ?? new Date()).toISOString().replace(/[:.]/g, '-')
+    backup = join(dirname(target), `${basename(target)}.decision-center-backup-${stamp}`)
+    await copyFile(target, backup)
+    mode = (await stat(target)).mode & 0o777
+  }
+  const temp = join(dirname(target), `.${basename(target)}.${randomBytes(6).toString('hex')}.tmp`)
+  await writeFile(temp, next, { mode })
+  await rename(temp, target)
+  return { path, status: 'changed', ...(backup ? { backup } : {}) }
+}

@@ -50,18 +50,33 @@ export function runArgs(command: string[], context: { env: NodeJS.ProcessEnv; cw
   ]
 }
 
-/** Runs `command` to its end and returns the exit code. Inside tmux already, it runs as it is. */
+const PRINTS_AND_EXITS = new Set(['-p', '--print', '-v', '-V', '--version', '-h', '--help', '--bg'])
+/** Subcommands that open a session. Every other one prints and exits. */
+const SESSION_SUBCOMMANDS = new Set(['attach', 'resume', 'fork'])
+
+/**
+ * Whether the call opens a session in this terminal. Output that is piped, a
+ * print flag or a subcommand (`claude mcp list`) must run outside tmux, where
+ * what it prints stays on screen. A wrong "no" only costs replies from the feed.
+ */
+export function opensSession(args: string[], io: { stdinTty: boolean; stdoutTty: boolean }): boolean {
+  if (!io.stdinTty || !io.stdoutTty) return false
+  const first = args[0] ?? ''
+  if (/^[a-z][a-z-]*$/.test(first) && !SESSION_SUBCOMMANDS.has(first)) return false
+  const flags = args.includes('--') ? args.slice(0, args.indexOf('--')) : args
+  return !flags.some((arg) => PRINTS_AND_EXITS.has(arg))
+}
+
+/** Runs `command` to its end and returns the exit code. */
 export function run(command: string[]): number {
   if (!command.length) {
     throw new Error('run needs a command, for example: decision-center run claude')
   }
-  if (process.env.TMUX) {
+  const io = { stdinTty: process.stdin.isTTY === true, stdoutTty: process.stdout.isTTY === true }
+  if (process.env.TMUX || !opensSession(command.slice(1), io)) {
     const direct = spawnSync(command[0]!, command.slice(1), { stdio: 'inherit' })
     if (direct.error) throw new Error(`couldn't start ${command[0]}: ${direct.error.message}`)
     return direct.status ?? 1
-  }
-  if (!process.stdin.isTTY) {
-    throw new Error('run needs a terminal')
   }
   const args = runArgs(command, { env: process.env, cwd: process.cwd(), platform: process.platform, id: randomBytes(2).toString('hex') })
   const tmux = spawnSync('tmux', args, { stdio: 'inherit' })

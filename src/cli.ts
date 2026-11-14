@@ -7,7 +7,21 @@ import { fileURLToPath } from 'node:url'
 import { DEFAULT_PORT, type AgentType } from './contract.ts'
 import { runHook } from './hook.ts'
 import { homeDir, sessionsDir } from './home.ts'
-import { applyHooks, hookCommand, hookProblems, installedEvents, placedHookPath, placeHook, removeHook, HOOK_EVENTS, type FileResult, type InstallTarget } from './install.ts'
+import {
+  applyHooks,
+  hasShellBlock,
+  hookCommand,
+  hookProblems,
+  installedEvents,
+  placedHookPath,
+  placeHook,
+  removeHook,
+  shellBlock,
+  updateShellFile,
+  HOOK_EVENTS,
+  type FileResult,
+  type InstallTarget
+} from './install.ts'
 import { serve } from './main.ts'
 import { run } from './run.ts'
 
@@ -17,8 +31,10 @@ const USAGE = `Usage: decision-center <command>
   open                  Open the feed in your browser.
   run <agent> [args]    Start an agent inside tmux, from any terminal, so the
                         feed can reply to it. Example: decision-center run claude
-  install [--dry-run] [--claude-settings <path>] [--codex-hooks <path>]
-                        Add the hooks to Claude Code and Codex.
+  install [--dry-run] [--alias] [--claude-settings <path>] [--codex-hooks <path>]
+                        Add the hooks to Claude Code and Codex. With --alias,
+                        also make claude and codex start through run, by
+                        adding two functions to your zsh or bash startup file.
   uninstall [--dry-run] [--claude-settings <path>] [--codex-hooks <path>]
                         Remove the hooks again.
   status                Show the home folder, hooks, sessions and tmux.
@@ -39,19 +55,21 @@ const DEFAULT_TARGETS: InstallTarget[] = [
 ]
 
 /** With a path flag, only the files named are touched. */
-function targetsFrom(args: string[]): { targets: InstallTarget[]; dryRun: boolean; everyFile: boolean } {
+function targetsFrom(args: string[]): { targets: InstallTarget[]; dryRun: boolean; everyFile: boolean; alias: boolean } {
   const named: InstallTarget[] = []
   let dryRun = false
+  let alias = false
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
     if (arg === '--dry-run') dryRun = true
+    else if (arg === '--alias') alias = true
     else if (arg === '--claude-settings' || arg === '--codex-hooks') {
       const path = args[++i]
       if (!path) throw new Error(`${arg} needs a path`)
       named.push({ agent: arg === '--claude-settings' ? 'claude' : 'codex', path })
     } else throw new Error(`unknown option ${arg}\n\n${USAGE}`)
   }
-  return { targets: named.length ? named : DEFAULT_TARGETS, dryRun, everyFile: !named.length }
+  return { targets: named.length ? named : DEFAULT_TARGETS, dryRun, everyFile: !named.length, alias }
 }
 
 const AGENT_NAME: Record<AgentType, string> = { claude: 'Claude Code', codex: 'Codex' }
@@ -70,10 +88,41 @@ function report(results: FileResult[], targets: InstallTarget[]): void {
   })
 }
 
+/** The startup files of the shells this user has: zsh and bash. */
+function shellFiles(): string[] {
+  const shell = process.env.SHELL ?? ''
+  const zsh = join(process.env.ZDOTDIR || homedir(), '.zshrc')
+  const bash = join(homedir(), '.bashrc')
+  return [...(existsSync(zsh) || shell.endsWith('zsh') ? [zsh] : []), ...(existsSync(bash) || shell.endsWith('bash') ? [bash] : [])]
+}
+
+/** Adds the claude and codex functions to each shell file, or with `add` false removes them. */
+async function shellFunctions(add: boolean, dryRun: boolean): Promise<void> {
+  const block = add ? shellBlock(process.execPath, fileURLToPath(import.meta.url)) : null
+  const files = shellFiles()
+  if (add && !files.length) {
+    console.log(`Shell: found no zsh or bash startup file. Add this to your shell's startup file yourself:\n${block}`)
+    return
+  }
+  for (const path of files) {
+    const result = await updateShellFile(path, block, { dryRun })
+    const did = add ? 'added the claude and codex functions to' : 'removed the claude and codex functions from'
+    const line = {
+      unchanged: add ? `Shell: ${path} is already up to date.` : null,
+      changed: `Shell: ${did} ${path}. Backup: ${result.backup ?? 'none, the file is new'}.${add ? ' Open a new terminal window to use them.' : ''}`,
+      'would-change': `Shell: would have ${did} ${path}.`
+    }[result.status]
+    if (line) console.log(line)
+  }
+}
+
 const BUILT_HOOK = fileURLToPath(new URL('./hook.mjs', import.meta.url))
 
 async function hooks(args: string[], install: boolean): Promise<void> {
-  const { targets, dryRun, everyFile } = targetsFrom(args)
+  const { targets, dryRun, everyFile, alias } = targetsFrom(args)
+  if (alias && !install) {
+    throw new Error(`uninstall takes no --alias; it removes the functions on its own\n\n${USAGE}`)
+  }
   if (install && !existsSync(BUILT_HOOK)) {
     throw new Error(`${BUILT_HOOK} is missing. Run npm run build first.`)
   }
@@ -84,6 +133,11 @@ async function hooks(args: string[], install: boolean): Promise<void> {
   report(results, targets)
   if (!install && !dryRun && everyFile) {
     await removeHook(home)
+  }
+  if (alias || (!install && everyFile)) {
+    await shellFunctions(install, dryRun)
+  } else if (install && !shellFiles().some((path) => existsSync(path) && hasShellBlock(readFileSync(path, 'utf8')))) {
+    console.log('Replies reach agents started with `decision-center run claude`. To make plain `claude` and `codex` start that way, run install --alias.')
   }
   if (install && !dryRun && results.some((result) => result.status === 'changed' && targets[results.indexOf(result)]!.agent === 'codex')) {
     console.log('Codex asks you to trust new or changed hooks the next time it starts. Untrusted hooks do not run.')
@@ -105,6 +159,8 @@ async function status(): Promise<void> {
       console.log(`  Not recording: ${problem}. Run install again.`)
     }
   }
+  const withFunctions = shellFiles().filter((path) => existsSync(path) && hasShellBlock(readFileSync(path, 'utf8')))
+  console.log(`Shell functions: ${withFunctions.length ? `installed (${withFunctions.join(', ')})` : 'not installed, so start agents with `decision-center run claude`'}`)
   const tmux = spawnSync('tmux', ['-V'], { encoding: 'utf8' })
   console.log(`tmux: ${tmux.status === 0 ? tmux.stdout.trim() : 'not found'}`)
   const health = await fetch(`${feedUrl()}api/health`).then((res) => res.ok).catch(() => false)
