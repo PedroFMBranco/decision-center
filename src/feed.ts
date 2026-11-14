@@ -20,6 +20,11 @@ export interface SessionContext {
   pending: Ask | null
   /** A Codex question read from the transcript, for a Codex session whose turn is done. */
   codexQuestion?: FeedQuestion | null
+  /**
+   * When the main agent's ask was denied or cancelled in the pane. No hook
+   * fires for that, and the agent then waits at its composer like a finished turn.
+   */
+  cancelledAt?: number
 }
 
 type Classified = Pick<FeedItem, 'kind' | 'state' | 'question' | 'permission' | 'since'>
@@ -31,6 +36,9 @@ function classify(session: Session, context: SessionContext): Classified | null 
   }
   if (pending?.kind === 'permission') {
     return { kind: 'permission', state: 'waiting', question: null, permission: pending.permission, since: pending.at }
+  }
+  if (context.cancelledAt !== undefined) {
+    return { kind: 'finished', state: 'done', question: null, permission: null, since: context.cancelledAt }
   }
   if (session.turn !== 'done') {
     return null

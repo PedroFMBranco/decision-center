@@ -160,7 +160,8 @@ export class FeedStore {
         session.agent === 'codex' && !pending && session.turn === 'done' && session.transcriptPath
           ? await this.deps.codexQuestion(session.transcriptPath)
           : null
-      const item = itemFromSession(session, { pending, codexQuestion })
+      const cancelled = session.pending && !pending && !session.pending.actor && session.turn === 'working'
+      const item = itemFromSession(session, { pending, codexQuestion, ...(cancelled ? { cancelledAt: session.pending!.at } : {}) })
       if (item) {
         next.set(item.id, item)
       }

@@ -595,6 +595,9 @@ function classify(session, context) {
   if (pending?.kind === "permission") {
     return { kind: "permission", state: "waiting", question: null, permission: pending.permission, since: pending.at };
   }
+  if (context.cancelledAt !== void 0) {
+    return { kind: "finished", state: "done", question: null, permission: null, since: context.cancelledAt };
+  }
   if (session.turn !== "done") {
     return null;
   }
@@ -1687,7 +1690,8 @@ var FeedStore = class {
       present.add(session.id);
       const pending = await this.pendingShown(session, now);
       const codexQuestion = session.agent === "codex" && !pending && session.turn === "done" && session.transcriptPath ? await this.deps.codexQuestion(session.transcriptPath) : null;
-      const item = itemFromSession(session, { pending, codexQuestion });
+      const cancelled = session.pending && !pending && !session.pending.actor && session.turn === "working";
+      const item = itemFromSession(session, { pending, codexQuestion, ...cancelled ? { cancelledAt: session.pending.at } : {} });
       if (item) {
         next.set(item.id, item);
       }

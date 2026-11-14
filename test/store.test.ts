@@ -150,12 +150,18 @@ test('flags of sessions gone for a week are forgotten', async () => {
   assert.deepEqual(Object.keys(world.stored?.sessions ?? {}), [])
 })
 
-test('an ask answered in the pane without a hook drops out once the pane shows no prompt (fact 9)', async () => {
+test('an ask denied or cancelled in the pane without a hook becomes a finished item once the pane shows no prompt (fact 9)', async () => {
   const { world, store } = harness()
   world.sessions = [s('a', { turn: 'working', pending: permissionAsk('touch b.txt', NOW - 4000) })]
   assert.deepEqual(ids(await store.refresh()), ['a:permission*'])
   world.screen = CLAUDE_COMPOSER
-  assert.deepEqual(ids(await store.refresh()), [])
+  const cancelled = await store.refresh()
+  assert.deepEqual(ids(cancelled), ['a:finished*'])
+  assert.equal(cancelled.items[0]?.since, NOW - 4000)
+  const sub = harness()
+  sub.world.screen = CLAUDE_COMPOSER
+  sub.world.sessions = [s('sub', { turn: 'working', pending: { ...permissionAsk('touch b.txt', NOW - 4000), actor: 'agent-1' } })]
+  assert.deepEqual(ids(await sub.store.refresh()), [])
   world.sessions = [s('a', { pending: permissionAsk('touch b.txt', NOW - 4000) })]
   assert.deepEqual(ids(await store.refresh()), ['a:finished*'])
   world.screen = CLAUDE_ASK
