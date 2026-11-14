@@ -8,7 +8,7 @@ Agent hooks report what each session is doing. tmux is how replies reach a sessi
 
 - macOS or Linux.
 - Node 22 or later.
-- tmux 3.2 or later. Run your agents inside tmux to reply from the feed.
+- tmux 3.2 or later. Replies reach an agent that runs inside tmux. `decision-center run claude` starts it that way from any terminal.
 - Claude Code and/or Codex.
 - For **Suggest replies** only: Claude Code installed and logged in (see below).
 
@@ -45,6 +45,21 @@ Some things are left to the pane itself, behind an **Open pane** button: Codex q
 Before it types anything, Decision Center reads the pane's screen. It refuses to reply when the prompt it expects isn't there, when you have unsent text in the composer, or when the pane is in tmux copy mode.
 
 `decision-center status` shows the home folder, whether the hooks are installed, how many sessions it has seen, the tmux version and whether the server runs.
+
+### Start an agent from any terminal
+
+```sh
+decision-center run claude          # or: decision-center run codex, with any arguments
+```
+
+`run` starts the agent inside tmux, in the terminal window you typed it in, so the feed can reply to it. It works in Terminal, iTerm, Ghostty and any other terminal. Inside tmux already, it runs the agent as it is.
+
+The session runs on a tmux server of its own, named `decision-center`, so your own tmux and its settings are untouched. That server shows no status line and adds no `Esc` delay. Two things differ from a bare terminal:
+
+- The mouse wheel scrolls tmux's history. While you are scrolled up, the pane is in copy mode and the feed refuses to reply; press `q` to leave it.
+- Dragging selects text through tmux. On macOS the selection is copied to the clipboard when you release the button. Hold `Option` (Terminal) or `Shift` (most others) while dragging for the terminal's own selection.
+
+Closing the terminal window ends the session.
 
 ### Sessions outside tmux
 

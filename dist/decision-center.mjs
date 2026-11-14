@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // src/cli.ts
-import { execFile as execFile4, spawnSync } from "node:child_process";
+import { execFile as execFile4, spawnSync as spawnSync2 } from "node:child_process";
 import { existsSync as existsSync3, readdirSync as readdirSync2, readFileSync as readFileSync2 } from "node:fs";
 import { homedir as homedir3 } from "node:os";
 import { join as join9 } from "node:path";
@@ -622,8 +622,8 @@ var CACHE_LIMIT = 200;
 var Suggester = class {
   cache = /* @__PURE__ */ new Map();
   run;
-  constructor(run2) {
-    this.run = run2;
+  constructor(run3) {
+    this.run = run3;
   }
   suggest(key, item) {
     let pending = this.cache.get(key);
@@ -2180,11 +2180,73 @@ async function serve(options) {
   return server;
 }
 
+// src/run.ts
+import { spawnSync } from "node:child_process";
+import { randomBytes as randomBytes3 } from "node:crypto";
+import { basename as basename4 } from "node:path";
+var SERVER = "decision-center";
+var quote2 = (text2) => `'${text2.replace(/'/g, `'\\''`)}'`;
+var SETTINGS = [
+  ["set", "-g", "status", "off"],
+  ["set", "-s", "escape-time", "0"],
+  ["set", "-g", "mouse", "on"],
+  ["set", "-g", "history-limit", "50000"],
+  ["set", "-g", "destroy-unattached", "on"],
+  ["set", "-g", "focus-events", "on"],
+  ["set", "-s", "extended-keys", "on"]
+];
+var COPY_TO_MAC_CLIPBOARD = ["bind", "-T", "copy-mode", "MouseDragEnd1Pane", "send", "-X", "copy-pipe-and-cancel", "pbcopy"];
+function runArgs(command, context) {
+  const settings = context.platform === "darwin" ? [...SETTINGS, COPY_TO_MAC_CLIPBOARD] : SETTINGS;
+  const env = Object.entries(context.env).flatMap(
+    ([name, value]) => value === void 0 || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || /^(TMUX|TMUX_PANE|TERM)$/.test(name) ? [] : ["-e", `${name}=${value}`]
+  );
+  return [
+    "-L",
+    SERVER,
+    "-f",
+    "/dev/null",
+    "start-server",
+    ";",
+    ...settings.flatMap((setting) => [...setting, ";"]),
+    "new-session",
+    "-s",
+    `${basename4(command[0])}-${context.id}`,
+    "-c",
+    context.cwd,
+    ...env,
+    "--",
+    // Why one quoted string: tmux reads a bare `;` argument as its own separator.
+    `exec ${command.map(quote2).join(" ")}`
+  ];
+}
+function run2(command) {
+  if (!command.length) {
+    throw new Error("run needs a command, for example: decision-center run claude");
+  }
+  if (process.env.TMUX) {
+    const direct = spawnSync(command[0], command.slice(1), { stdio: "inherit" });
+    if (direct.error) throw new Error(`couldn't start ${command[0]}: ${direct.error.message}`);
+    return direct.status ?? 1;
+  }
+  if (!process.stdin.isTTY) {
+    throw new Error("run needs a terminal");
+  }
+  const args = runArgs(command, { env: process.env, cwd: process.cwd(), platform: process.platform, id: randomBytes3(2).toString("hex") });
+  const tmux2 = spawnSync("tmux", args, { stdio: "inherit" });
+  if (tmux2.error) {
+    throw new Error(`couldn't start tmux: ${tmux2.error.message}. Install tmux 3.2 or later.`);
+  }
+  return tmux2.status ?? 1;
+}
+
 // src/cli.ts
 var USAGE = `Usage: decision-center <command>
 
   serve                 Run the feed server in the foreground (the default).
   open                  Open the feed in your browser.
+  run <agent> [args]    Start an agent inside tmux, from any terminal, so the
+                        feed can reply to it. Example: decision-center run claude
   install [--dry-run] [--claude-settings <path>] [--codex-hooks <path>]
                         Add the hooks to Claude Code and Codex.
   uninstall [--dry-run] [--claude-settings <path>] [--codex-hooks <path>]
@@ -2265,7 +2327,7 @@ async function status() {
       console.log(`  Not recording: ${problem}. Run install again.`);
     }
   }
-  const tmux2 = spawnSync("tmux", ["-V"], { encoding: "utf8" });
+  const tmux2 = spawnSync2("tmux", ["-V"], { encoding: "utf8" });
   console.log(`tmux: ${tmux2.status === 0 ? tmux2.stdout.trim() : "not found"}`);
   const health = await fetch(`${feedUrl()}api/health`).then((res) => res.ok).catch(() => false);
   console.log(`Server: ${health ? `running at ${feedUrl()}` : `not running on port ${port()}`}`);
@@ -2289,6 +2351,9 @@ async function main() {
     }
     case "open":
       return openFeed();
+    case "run":
+      process.exitCode = run2(args);
+      return;
     case "hook":
       return runHook(args[0]);
     case "install":

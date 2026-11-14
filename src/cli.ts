@@ -9,11 +9,14 @@ import { runHook } from './hook.ts'
 import { homeDir, sessionsDir } from './home.ts'
 import { applyHooks, hookCommand, hookProblems, installedEvents, placedHookPath, placeHook, removeHook, HOOK_EVENTS, type FileResult, type InstallTarget } from './install.ts'
 import { serve } from './main.ts'
+import { run } from './run.ts'
 
 const USAGE = `Usage: decision-center <command>
 
   serve                 Run the feed server in the foreground (the default).
   open                  Open the feed in your browser.
+  run <agent> [args]    Start an agent inside tmux, from any terminal, so the
+                        feed can reply to it. Example: decision-center run claude
   install [--dry-run] [--claude-settings <path>] [--codex-hooks <path>]
                         Add the hooks to Claude Code and Codex.
   uninstall [--dry-run] [--claude-settings <path>] [--codex-hooks <path>]
@@ -128,6 +131,9 @@ async function main(): Promise<void> {
     }
     case 'open':
       return openFeed()
+    case 'run':
+      process.exitCode = run(args)
+      return
     case 'hook':
       return runHook(args[0])
     case 'install':
