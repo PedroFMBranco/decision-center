@@ -6,7 +6,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const BUNDLES = ['main.mjs', 'hook.mjs']
+const BUNDLES = ['decision-center.mjs', 'hook.mjs']
 const HOOK_IMPORTS = new Set(['node:fs', 'node:path', 'node:os', 'node:crypto'])
 
 const dir = mkdtempSync(join(tmpdir(), 'decision-center-'))

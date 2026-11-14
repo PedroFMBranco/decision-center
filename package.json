@@ -3,7 +3,10 @@
   "version": "0.2.3",
   "private": true,
   "type": "module",
-  "description": "Orca plugin: a feed of Claude Code and Codex sessions waiting on you.",
+  "bin": {
+    "decision-center": "dist/decision-center.mjs"
+  },
+  "description": "A feed of the Claude Code and Codex sessions in tmux that finished, need permission or asked a question, with replies from the browser.",
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
@@ -15,5 +18,8 @@
     "esbuild": "0.28.2",
     "typescript": "^7.0.2"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  }
 }
