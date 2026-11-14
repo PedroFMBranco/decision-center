@@ -5,91 +5,70 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Decision Center</title>
 <style>
-/* The served page (issue 0016), ported from prototype v2 (prototype/decision-center.html, issue 0007).
-   One self-contained file: the server's CSP allows no external fonts or scripts, so it uses system fonts. */
-@property --a { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+/* The served page. One self-contained file: the server's CSP allows no external
+   fonts or scripts, so it uses system fonts. Flat surfaces and one neutral
+   palette; colour only marks an item's state. */
 :root {
-  --bg: #07080b; --ink: #f1f3f7; --ink-2: #bcc1cc; --ink-3: #9aa0ad;
-  --glass: rgba(255,255,255,.035); --glass-2: rgba(255,255,255,.06); --edge: rgba(255,255,255,.08); --edge-2: rgba(255,255,255,.14);
-  --q: #ffb547; --p: #ff5d5d; --d: #3ee6c1; --c: #8f95a1; --w: #8b95ff;
-  --claude-1: #ff9a6b; --claude-2: #e0482a; --codex-1: #3ee6c1; --codex-2: #2b8cff;
-  --mood: #8b95ff; --mood-2: #3ee6c1;
-  --display: "SF Pro Display", -apple-system, system-ui, sans-serif;
+  --bg: #111214; --surface: #18191c; --surface-2: #202226; --line: #2a2c31; --line-2: #3a3d44;
+  --ink: #e8e9ec; --ink-2: #b4b7be; --ink-3: #8b8f98;
+  --accent: #6ea0ff;
+  --q: #d9a441; --p: #e06c6c; --d: #5fb58c; --c: #8b8f98; --w: #8b8f98;
   --sans: -apple-system, system-ui, "Segoe UI", sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, monospace;
-  --ease: cubic-bezier(.2,.8,.2,1);
-  --row-y: 12px;
+  --row-y: 10px;
   color-scheme: dark;
 }
 :root[data-theme="light"] {
-  --bg: #f3f2ee; --ink: #15161a; --ink-2: #41454f; --ink-3: #52565f;
-  --glass: rgba(255,255,255,.6); --glass-2: rgba(255,255,255,.85); --edge: rgba(20,22,30,.09); --edge-2: rgba(20,22,30,.16);
-  --q: #7f4700; --p: #a01818; --d: #065f4e; --c: #555963; --w: #3a41b8;
+  --bg: #ffffff; --surface: #f7f7f8; --surface-2: #efeff1; --line: #e3e4e7; --line-2: #c9cbd1;
+  --ink: #1b1c1f; --ink-2: #474a52; --ink-3: #6b6f78;
+  --accent: #2459c9;
+  --q: #8a5a00; --p: #b3261e; --d: #1f7a4d; --c: #6b6f78; --w: #6b6f78;
   color-scheme: light;
 }
-:root.compact { --row-y: 7px; }
-body[data-mood="question"] { --mood: var(--q); --mood-2: #ff7a3d; }
-body[data-mood="permission"] { --mood: var(--p); --mood-2: #ff9a3d; }
-body[data-mood="done"] { --mood: var(--d); --mood-2: #2b8cff; }
-body[data-mood="working"] { --mood: var(--w); --mood-2: #3ee6c1; }
-body[data-mood="closed"] { --mood: #555a66; --mood-2: #333844; }
+:root.compact { --row-y: 6px; }
 
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
 body { background: var(--bg); color: var(--ink); font: 14px/1.5 var(--sans); overflow: hidden; -webkit-font-smoothing: antialiased; }
 button { font: inherit; color: inherit; cursor: pointer; }
-kbd { font: 500 10.5px/1 var(--mono); border: 1px solid var(--edge-2); border-bottom-width: 2px; border-radius: 5px; padding: 2px 5px; color: var(--ink-2); background: var(--glass); }
-::selection { background: color-mix(in srgb, var(--mood) 35%, transparent); }
-:focus-visible { outline: 2px solid var(--mood); outline-offset: 2px; }
-
-/* ---------- backdrop: aurora blobs tinted by the selected item's state, dot grid, grain ---------- */
-.aurora { position: fixed; inset: -20%; z-index: 0; pointer-events: none; filter: blur(90px) saturate(140%); opacity: .5; }
-:root[data-theme="light"] .aurora { opacity: .35; }
-.aurora i { position: absolute; border-radius: 50%; transition: background-color 1.2s var(--ease); }
-.aurora i:nth-child(1) { width: 46vw; height: 46vw; left: 38%; top: -8%; background: var(--mood); animation: drift1 22s ease-in-out infinite alternate; }
-.aurora i:nth-child(2) { width: 38vw; height: 38vw; left: 70%; top: 40%; background: var(--mood-2); opacity: .7; animation: drift2 26s ease-in-out infinite alternate; }
-.aurora i:nth-child(3) { width: 30vw; height: 30vw; left: 10%; top: 60%; background: #6d5dfc; opacity: .35; animation: drift1 30s ease-in-out infinite alternate-reverse; }
-@keyframes drift1 { to { transform: translate(-12vw, 10vh) scale(1.15); } }
-@keyframes drift2 { to { transform: translate(-8vw, -14vh) scale(.9); } }
-.scrim { position: fixed; inset: 0; z-index: 0; pointer-events: none; background: color-mix(in srgb, var(--bg) 72%, transparent); }
-.dots { position: fixed; inset: 0; z-index: 0; pointer-events: none; background-image: radial-gradient(var(--edge-2) 1px, transparent 1px); background-size: 22px 22px; mask-image: radial-gradient(ellipse at 60% 30%, #000 10%, transparent 70%); opacity: .6; }
-.grain { position: fixed; inset: 0; z-index: 60; pointer-events: none; opacity: .05; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"); }
+kbd { font: 500 10.5px/1 var(--mono); border: 1px solid var(--line-2); border-radius: 4px; padding: 2px 4px; color: var(--ink-3); background: var(--bg); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.s-question { --tone: var(--q); } .s-permission { --tone: var(--p); } .s-done { --tone: var(--d); } .s-closed { --tone: var(--c); } .s-working { --tone: var(--w); }
 
 /* ---------- shell ---------- */
-.app { position: relative; z-index: 1; display: grid; grid-template-rows: auto auto 1fr; height: 100vh; }
-header.top { display: flex; align-items: center; gap: 16px; padding: 14px 20px; border-bottom: 1px solid var(--edge); backdrop-filter: blur(12px); }
-.logo { position: relative; width: 26px; height: 26px; border-radius: 8px; background: conic-gradient(from var(--a), var(--mood), var(--mood-2), var(--mood)); animation: spin 8s linear infinite; box-shadow: 0 0 24px color-mix(in srgb, var(--mood) 45%, transparent); }
-.logo::after { content: ""; position: absolute; inset: 6px; border-radius: 4px; background: var(--bg); }
-.brand { display: flex; align-items: center; gap: 12px; }
-.brand h1 { font: 700 17px/1 var(--display); letter-spacing: -.02em; margin: 0; }
-.ticker { display: inline-flex; align-items: center; font: 600 12px/1 var(--mono); height: 22px; padding: 0 8px; border-radius: 999px; background: var(--ink); color: var(--bg); transition: background .3s, color .3s; }
-.ticker.zero { background: var(--glass-2); color: var(--ink-3); }
-.dg { display: inline-block; height: 1em; overflow: hidden; }
-.dg .col { display: flex; flex-direction: column; transition: transform .7s var(--ease); }
-.dg .col span { height: 1em; line-height: 1; }
+.app { display: grid; grid-template-rows: auto auto 1fr; height: 100vh; }
+header.top { display: flex; align-items: center; gap: 14px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+.brand { display: flex; align-items: baseline; gap: 8px; }
+.brand h1 { font: 600 14px/1.4 var(--sans); margin: 0; }
+.count { font: 500 12px var(--sans); color: var(--ink-3); }
+.count.zero { display: none; }
 .top .spacer { flex: 1; }
-.pillbtn { display: inline-flex; align-items: center; gap: 8px; background: var(--glass); border: 1px solid var(--edge); border-radius: 999px; padding: 6px 12px; font-size: 12.5px; color: var(--ink-2); transition: .2s; }
-.pillbtn:hover { color: var(--ink); border-color: var(--edge-2); background: var(--glass-2); }
-.pillbtn:disabled { opacity: .4; cursor: default; }
+.btn { display: inline-flex; align-items: center; gap: 7px; background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px; padding: 4px 10px; font-size: 13px; color: var(--ink-2); }
+.btn:hover { color: var(--ink); background: var(--surface-2); }
+.btn:disabled { opacity: .5; cursor: default; background: var(--bg); color: var(--ink-3); }
+.btn.primary { background: var(--ink); border-color: var(--ink); color: var(--bg); font-weight: 500; }
+.btn.primary:hover { opacity: .88; }
+.btn.primary:disabled { background: var(--surface-2); border-color: var(--line-2); color: var(--ink-3); opacity: 1; }
+.btn.primary kbd { color: inherit; background: none; border-color: currentColor; opacity: .7; }
 
 /* connection state: a dot in the header, a banner when the server is gone */
-.conn { display: inline-flex; align-items: center; gap: 7px; font: 500 11px var(--mono); color: var(--ink-3); }
+.conn { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-3); }
 .conn i { width: 7px; height: 7px; border-radius: 50%; background: var(--c); }
-.conn.live i { background: var(--d); box-shadow: 0 0 0 0 var(--d); animation: ping 2.4s var(--ease) infinite; }
+.conn.live i { background: var(--d); }
 .conn.down i { background: var(--p); }
-.banner { display: none; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 20px; font-size: 13px; color: var(--ink); border-bottom: 1px solid color-mix(in srgb, var(--p) 40%, transparent); background: color-mix(in srgb, var(--p) 12%, var(--bg)); }
+.banner { display: none; align-items: center; gap: 12px; flex-wrap: wrap; padding: 8px 16px; font-size: 13px; border-bottom: 1px solid var(--line); border-left: 3px solid var(--p); background: var(--surface); }
 .banner.on { display: flex; }
 .banner b { font-weight: 600; }
-.banner small { font: 11px var(--mono); color: var(--ink-2); }
+.banner small { font-size: 12px; color: var(--ink-3); }
 
-/* segmented control with a sliding pill */
-.seg { position: relative; display: inline-flex; padding: 3px; border-radius: 999px; background: var(--glass); border: 1px solid var(--edge); }
-.seg button { position: relative; z-index: 1; background: none; border: 0; padding: 5px 12px; font-size: 12.5px; color: var(--ink-3); transition: color .25s; }
-.seg button.on { color: var(--ink); }
-.seg button b { font: 500 11px var(--mono); margin-left: 5px; color: var(--ink-2); }
-.seg .pill { position: absolute; z-index: 0; top: 3px; bottom: 3px; border-radius: 999px; background: var(--glass-2); border: 1px solid var(--edge-2); transition: left .35s var(--ease), width .35s var(--ease); }
+.seg { display: inline-flex; border: 1px solid var(--line-2); border-radius: 6px; overflow: hidden; }
+.seg button { background: var(--bg); border: 0; border-left: 1px solid var(--line-2); padding: 4px 10px; font-size: 13px; color: var(--ink-3); }
+.seg button:first-child { border-left: 0; }
+.seg button:hover { color: var(--ink); }
+.seg button.on { background: var(--surface-2); color: var(--ink); }
+.seg button b { font-weight: 400; margin-left: 5px; color: var(--ink-3); }
 
-.main { grid-row: 3; display: grid; grid-template-columns: minmax(320px, 400px) 1fr; min-height: 0; }
+.main { grid-row: 3; display: grid; grid-template-columns: minmax(300px, 380px) 1fr; min-height: 0; }
 @media (max-width: 800px) {
   .main { grid-template-columns: 1fr; }
   .main.detail-open .feed { display: none; }
@@ -98,246 +77,169 @@ header.top { display: flex; align-items: center; gap: 16px; padding: 14px 20px; 
   .seg, .conn span, #paletteBtn, #nextBtn { display: none; }
 }
 
-/* ---------- feed: animated list of spotlight cards ---------- */
-.feed { min-width: 0; overflow-y: auto; padding: 8px 12px 90px; border-right: 1px solid var(--edge); scrollbar-width: thin; }
-.group-h { display: flex; align-items: center; gap: 10px; padding: 14px 8px 8px; font: 500 10.5px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); }
-.group-h .rule { flex: 1; height: 1px; background: linear-gradient(90deg, var(--edge-2), transparent); }
-.group-h button { font: 500 10.5px var(--mono); letter-spacing: .04em; text-transform: none; background: none; border: 0; color: var(--ink-3); padding: 0; }
-.group-h button:hover { color: var(--ink); }
+/* ---------- feed ---------- */
+.feed { min-width: 0; overflow-y: auto; padding-bottom: 40px; border-right: 1px solid var(--line); background: var(--surface); scrollbar-width: thin; }
+.group-h { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 14px 16px 6px; font-size: 12px; font-weight: 600; color: var(--ink-3); }
+.group-h button { font-size: 12px; font-weight: 400; background: none; border: 0; color: var(--ink-3); padding: 0; }
+.group-h button:hover { color: var(--ink); text-decoration: underline; }
 
-.spot { --mx: 50%; --my: 50%; }
-.spot::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: 0; transition: opacity .3s; background: radial-gradient(260px circle at var(--mx) var(--my), color-mix(in srgb, var(--tone, var(--mood)) 16%, transparent), transparent 60%); }
-.spot:hover::after { opacity: 1; }
-
-.card { position: relative; display: grid; grid-template-columns: 34px 1fr auto; gap: 2px 12px; margin: 4px 0; padding: var(--row-y) 14px; border-radius: 14px; border: 1px solid transparent; cursor: pointer; transition: background .25s, border-color .25s, opacity .3s; overflow: hidden; }
-.card:hover { background: var(--glass); border-color: var(--edge); }
-.card.sel { background: var(--glass-2); border-color: var(--edge-2); box-shadow: 0 10px 30px -12px color-mix(in srgb, var(--tone) 50%, transparent), inset 0 1px 0 var(--edge); }
-.card.sel::before { content: ""; position: absolute; left: 0; top: 18%; bottom: 18%; width: 3px; border-radius: 3px; background: var(--tone); box-shadow: 0 0 12px var(--tone); }
-.s-question { --tone: var(--q); } .s-permission { --tone: var(--p); } .s-done { --tone: var(--d); } .s-closed { --tone: var(--c); } .s-working { --tone: var(--w); }
-
-/* border beam: a light travelling round unread waiting cards */
-.beam > .ring { position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none;
-  background: conic-gradient(from var(--a), transparent 0 72%, var(--tone) 86%, #fff 90%, transparent 94%);
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; animation: spin 3.2s linear infinite; }
-@keyframes spin { to { --a: 360deg; } }
-
-.orb { grid-row: span 2; position: relative; width: 34px; height: 34px; border-radius: 50%; margin-top: 1px;
-  background: radial-gradient(circle at 32% 28%, rgba(255,255,255,.55), transparent 38%), conic-gradient(from var(--a), var(--o1), var(--o2), var(--o1)); }
-.orb.claude { --o1: var(--claude-1); --o2: var(--claude-2); } .orb.codex { --o1: var(--codex-1); --o2: var(--codex-2); }
-.unread .orb { animation: spin 5s linear infinite; box-shadow: 0 0 18px -2px var(--o1); }
-.orb .st { position: absolute; right: -4px; bottom: -4px; width: 17px; height: 17px; border-radius: 50%; display: grid; place-items: center; font: 700 10px/1 var(--mono); color: var(--bg); background: var(--tone); border: 2px solid var(--bg); }
-.s-closed .orb { --o1: #6b707c; --o2: #3b3f49; }
+.card { display: grid; grid-template-columns: 8px 1fr auto; gap: 1px 10px; padding: var(--row-y) 16px; border-left: 2px solid transparent; cursor: pointer; }
+.card:hover { background: var(--surface-2); }
+.card.sel { background: var(--surface-2); border-left-color: var(--ink); }
+/* the state dot: filled while unread, a ring once read */
+.mark { grid-row: span 2; width: 8px; height: 8px; margin-top: 7px; border-radius: 50%; border: 1.5px solid var(--tone); }
+.unread .mark { background: var(--tone); }
 .card .title { font-size: 13.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card .title b { color: var(--ink); font-weight: 500; }
-.card.unread .title { color: var(--ink); } .card.unread .title b { font-weight: 700; }
-.card .when { font: 11px var(--mono); color: var(--ink-3); white-space: nowrap; align-self: center; display: inline-flex; align-items: center; gap: 6px; }
-.card.unread .when::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--tone); box-shadow: 0 0 0 0 var(--tone); animation: ping 1.8s var(--ease) infinite; }
-@keyframes ping { 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+.card.unread .title { color: var(--ink); } .card.unread .title b { font-weight: 650; }
+.card .when { font-size: 12px; color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .card .preview { grid-column: 2 / 4; font-size: 12.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.compact .card .preview { display: none; } .compact .orb { grid-row: auto; width: 26px; height: 26px; }
-.tag { font: 500 10px var(--mono); border: 1px dashed var(--c); color: var(--c); border-radius: 5px; padding: 0 5px; margin-left: 6px; }
-.card.sent .title, .card.queued .title { color: var(--ink-2); } .card.sent .title b, .card.queued .title b { font-weight: 500; }
-.card.sent .orb, .card.queued .orb { animation: spin 1.2s linear infinite; }
+.card .preview i { font-style: normal; color: var(--tone); }
+.compact .card .preview { display: none; } .compact .mark { grid-row: auto; }
+.card.sent, .card.queued { opacity: .6; }
 
-.empty { padding: 70px 24px; text-align: center; color: var(--ink-3); }
-.empty strong { display: block; font: 700 22px/1.2 var(--display); color: var(--ink); margin-bottom: 6px; letter-spacing: -.02em; }
+.empty { padding: 56px 24px; text-align: center; color: var(--ink-3); font-size: 13px; }
+.empty strong { display: block; font-size: 14px; font-weight: 600; color: var(--ink-2); margin-bottom: 4px; }
 
 /* ---------- detail ---------- */
 .detail { display: grid; grid-template-rows: auto 1fr auto; grid-template-columns: minmax(0, 1fr); min-height: 0; min-width: 0; }
-.d-head { display: flex; align-items: center; gap: 14px; padding: 20px 28px 16px; }
+.d-head { display: flex; align-items: flex-start; gap: 10px; padding: 16px 24px 12px; border-bottom: 1px solid var(--line); }
 .d-head .where { min-width: 0; flex: 1 1 auto; }
-.d-head > .pillbtn { flex: none; }
-.d-head h2 { font: 800 clamp(22px, 2.6vw, 32px)/1.05 var(--display); letter-spacing: -.035em; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.d-head h2 span { color: var(--ink-3); font-weight: 500; }
-.d-head .meta { display: flex; gap: 8px; align-items: center; margin-top: 8px; font: 11.5px var(--mono); color: var(--ink-3); flex-wrap: wrap; }
-.chipmeta { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--edge); background: color-mix(in srgb, var(--bg) 70%, transparent); color: var(--ink-2); }
-.adot { width: 8px; height: 8px; border-radius: 50%; background: linear-gradient(135deg, var(--claude-1), var(--claude-2)); }
-.adot.codex { background: linear-gradient(135deg, var(--codex-1), var(--codex-2)); }
-.statepill { display: inline-flex; align-items: center; gap: 7px; padding: 3px 10px 3px 8px; border-radius: 999px; font: 500 10.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--tone); background: color-mix(in srgb, var(--tone) 12%, transparent); border: 1px solid color-mix(in srgb, var(--tone) 30%, transparent); }
-.statepill i { width: 6px; height: 6px; border-radius: 50%; background: var(--tone); box-shadow: 0 0 0 0 var(--tone); animation: ping 1.8s var(--ease) infinite; }
-.d-head .spacer { flex: 1; }
+.d-head > .btn { flex: none; }
+.d-head h2 { font: 600 16px/1.35 var(--sans); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.d-head h2 span { color: var(--ink-3); font-weight: 400; }
+.d-head .meta { display: flex; gap: 6px; align-items: center; margin-top: 2px; font-size: 12.5px; color: var(--ink-3); flex-wrap: wrap; }
+.d-head .meta > * + *::before { content: "·"; margin-right: 6px; color: var(--ink-3); }
+.state { color: var(--tone); font-weight: 500; }
 .back { display: none; }
 
-.d-body { overflow-y: auto; padding: 4px 28px 32px; }
-.reveal > * { animation: rise .55s var(--ease) both; }
-.reveal > *:nth-child(2) { animation-delay: .06s; } .reveal > *:nth-child(3) { animation-delay: .12s; } .reveal > *:nth-child(4) { animation-delay: .18s; }
-@keyframes rise { from { opacity: 0; transform: translateY(10px); filter: blur(6px); } }
-.label { font: 500 10.5px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); margin: 0 0 10px; display: flex; align-items: center; gap: 10px; }
-.label::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, var(--edge), transparent); }
+.d-body { overflow-y: auto; padding: 16px 24px 28px; }
+.label { font-size: 12px; font-weight: 600; color: var(--ink-3); margin: 0 0 6px; }
 
-.glasscard { position: relative; max-width: 78ch; border-radius: 18px; padding: 18px 22px; background: var(--glass); border: 1px solid var(--edge); backdrop-filter: blur(14px); box-shadow: inset 0 1px 0 var(--edge); }
-.msg { font-size: 14.5px; line-height: 1.65; color: var(--ink); overflow-wrap: anywhere; }
-.msg p { margin: 0 0 .85em; } .msg > :last-child { margin-bottom: 0; }
-.msg .h { font-weight: 700; font-family: var(--display); font-size: 15.5px; margin-top: 1.1em; }
-.msg ul, .msg ol { margin: 0 0 .85em; padding-left: 1.3em; } .msg li { margin: .2em 0; } .msg li::marker { color: var(--ink-3); }
+.msgbox { max-width: 78ch; }
+.msg { font-size: 14px; line-height: 1.6; color: var(--ink); overflow-wrap: anywhere; }
+.msg p { margin: 0 0 .8em; } .msg > :last-child { margin-bottom: 0; }
+.msg .h { font-weight: 600; margin-top: 1.1em; }
+.msg ul, .msg ol { margin: 0 0 .8em; padding-left: 1.3em; } .msg li { margin: .15em 0; } .msg li::marker { color: var(--ink-3); }
 .msg strong { font-weight: 600; }
-.msg code { font: 12.5px var(--mono); background: var(--glass-2); border: 1px solid var(--edge); border-radius: 5px; padding: 1px 5px; }
-.msg pre { font: 12.5px/1.6 var(--mono); background: rgba(0,0,0,.35); border: 1px solid var(--edge); border-radius: 12px; padding: 12px 14px; overflow-x: auto; }
-:root[data-theme="light"] .msg pre { background: rgba(255,255,255,.7); }
-.msg pre code { border: 0; padding: 0; background: none; }
-.msg table { border-collapse: collapse; font-size: 13px; margin: 0 0 .85em; display: block; overflow-x: auto; }
-.msg th, .msg td { border-bottom: 1px solid var(--edge); padding: 6px 16px 6px 0; text-align: left; }
-.msg th { font: 500 10.5px var(--mono); color: var(--ink-3); text-transform: uppercase; letter-spacing: .08em; }
-.msg .next-line { background: linear-gradient(90deg, color-mix(in srgb, var(--d) 22%, transparent), transparent); border-left: 2px solid var(--d); padding: 4px 10px; border-radius: 0 8px 8px 0; display: inline-block; }
+.msg code { font: 12.5px var(--mono); background: var(--surface-2); border-radius: 4px; padding: 1px 4px; }
+.msg pre { font: 12.5px/1.55 var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; overflow-x: auto; }
+.msg pre code { padding: 0; background: none; }
+.msg table { border-collapse: collapse; font-size: 13px; margin: 0 0 .8em; display: block; overflow-x: auto; }
+.msg th, .msg td { border-bottom: 1px solid var(--line); padding: 5px 16px 5px 0; text-align: left; }
+.msg th { font-weight: 600; color: var(--ink-2); }
+.msg .next-line { font-weight: 600; }
 .msg .none { color: var(--ink-3); }
-.clamp { max-height: 24em; overflow: hidden; mask-image: linear-gradient(#000 70%, transparent); }
+.clamp { max-height: 24em; overflow: hidden; }
 .more { margin-top: 10px; }
 
-/* question / permission: tilt tiles */
-.ask { max-width: 78ch; margin-top: 24px; }
-.ask h3 { font: 700 20px/1.2 var(--display); letter-spacing: -.02em; margin: 0 0 4px; }
-.ask .sub { font-size: 12.5px; color: var(--ink-3); margin-bottom: 14px; }
-.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; perspective: 900px; }
-.tile { --rx: 0deg; --ry: 0deg; position: relative; text-align: left; padding: 14px 16px 16px; border-radius: 16px; background: var(--glass); border: 1px solid var(--edge); transform: rotateX(var(--rx)) rotateY(var(--ry)); transition: transform .2s var(--ease), border-color .2s, background .2s; overflow: hidden; }
-.tile:hover { border-color: var(--edge-2); background: var(--glass-2); }
-.tile .k { display: inline-grid; place-items: center; min-width: 24px; height: 24px; padding: 0 5px; border-radius: 7px; font: 600 12px var(--mono); border: 1px solid var(--edge-2); border-bottom-width: 2px; color: var(--ink-2); margin-bottom: 12px; }
-.tile .t { display: block; font: 700 16px/1.25 var(--display); letter-spacing: -.01em; }
-.tile .d { display: block; font-size: 12.5px; color: var(--ink-3); margin-top: 4px; }
-.tile.picked { border-color: var(--tone); background: color-mix(in srgb, var(--tone) 10%, var(--glass)); }
-.tile.picked .k { background: var(--tone); color: #0b0c10; border-color: var(--tone); }
-.tile.pressed { animation: press .35s var(--ease); }
+/* question / permission */
+.ask { max-width: 78ch; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+.ask h3 { font: 600 15px/1.4 var(--sans); margin: 0 0 2px; }
+.ask .sub { font-size: 12.5px; color: var(--ink-3); margin-bottom: 10px; }
+.tiles { display: grid; gap: 6px; }
+.tile { display: grid; grid-template-columns: 22px 1fr; gap: 0 10px; text-align: left; padding: 8px 12px; border-radius: 6px; background: var(--bg); border: 1px solid var(--line-2); }
+.tile:hover { background: var(--surface-2); }
+.tile .k { grid-row: span 2; align-self: start; display: inline-grid; place-items: center; height: 20px; margin-top: 1px; border-radius: 4px; font: 500 11.5px var(--mono); border: 1px solid var(--line-2); color: var(--ink-3); }
+.tile .t { font-weight: 500; }
+.tile .d { grid-column: 2; font-size: 12.5px; color: var(--ink-3); }
+.tile.picked { border-color: var(--ink); background: var(--surface-2); }
+.tile.picked .k { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 .tile:disabled { cursor: default; }
-@keyframes press { 40% { transform: scale(.96); } }
-.term { position: relative; font: 13px/1.5 var(--mono); padding: 14px 16px; border-radius: 14px; background: rgba(0,0,0,.45); border: 1px solid color-mix(in srgb, var(--p) 35%, transparent); margin-bottom: 14px; overflow: hidden; word-break: break-all; }
-:root[data-theme="light"] .term { background: #1a1b20; color: #eef0f4; }
-.term::before { content: "$ "; color: var(--p); }
-:root[data-theme="light"] .term::before { color: #ff8a8a; }
-.term::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--p) 18%, transparent), transparent); transform: translateX(-100%); animation: scan 2.8s var(--ease) infinite; }
-@keyframes scan { 60%, 100% { transform: translateX(100%); } }
-.note { font-size: 12px; color: var(--ink-3); margin-top: 12px; }
+.term { font: 13px/1.5 var(--mono); padding: 10px 12px; border-radius: 6px; background: var(--surface); border: 1px solid var(--line); margin-bottom: 10px; word-break: break-all; }
+.term::before { content: "$ "; color: var(--ink-3); }
+.note { font-size: 12.5px; color: var(--ink-3); margin-top: 10px; }
 /* a question with several parts: the highlighted part takes the digits */
-.part { margin-top: 18px; padding-left: 14px; border-left: 2px solid transparent; transition: border-color .2s; }
-.part.active { border-left-color: var(--tone); }
-.part h3 { font-size: 17px; }
+.part { margin-top: 14px; padding-left: 12px; border-left: 2px solid var(--line); }
+.part.active { border-left-color: var(--ink); }
 
 /* ---------- reply dock ---------- */
-.dock { padding: 14px 28px 18px; border-top: 1px solid var(--edge); backdrop-filter: blur(14px); background: color-mix(in srgb, var(--bg) 82%, transparent); }
-.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+.dock { padding: 12px 24px 14px; border-top: 1px solid var(--line); background: var(--surface); }
+.row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 10px; }
 .dock > .row:last-child { margin-bottom: 0; }
-.prop { position: relative; overflow: hidden; display: inline-flex; align-items: center; gap: 8px; max-width: 100%; background: var(--glass); border: 1px solid var(--edge); border-radius: 999px; padding: 6px 14px 6px 8px; font-size: 13px; transition: border-color .2s, transform .2s var(--ease); animation: pop .45s var(--ease) both; }
-.prop:nth-child(2) { animation-delay: .06s; } .prop:nth-child(3) { animation-delay: .12s; }
-@keyframes pop { from { opacity: 0; transform: translateY(6px) scale(.94); } }
-.prop:hover { border-color: var(--edge-2); transform: translateY(-1px); }
-.prop::after { content: ""; position: absolute; inset: 0; background: linear-gradient(110deg, transparent 35%, rgba(255,255,255,.12) 50%, transparent 65%); transform: translateX(-100%); transition: transform .7s var(--ease); }
-.prop:hover::after { transform: translateX(100%); }
-.prop .k { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; font: 600 10.5px var(--mono); background: var(--glass-2); color: var(--ink-2); }
+.prop { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px; padding: 4px 10px 4px 6px; font-size: 13px; }
+.prop:hover { background: var(--surface-2); }
+.prop .k { font: 500 11px var(--mono); color: var(--ink-3); border: 1px solid var(--line-2); border-radius: 4px; padding: 0 4px; }
 .prop .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 44ch; }
-.src { font: 10.5px var(--mono); color: var(--ink-3); }
-.skel { width: 150px; height: 32px; border-radius: 999px; background: linear-gradient(90deg, var(--glass) 0%, var(--glass-2) 50%, var(--glass) 100%); background-size: 200% 100%; animation: sheen 1.2s linear infinite; }
-.skel:nth-child(3) { width: 190px; } .skel:nth-child(4) { width: 120px; }
-@keyframes sheen { to { background-position: -200% 0; } }
-.shimmer-text { font: 500 12.5px var(--mono); background: linear-gradient(90deg, var(--ink-3) 0%, var(--ink) 50%, var(--ink-3) 100%); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: sheen 1.6s linear infinite; }
-/* shimmer button */
-.shimmer { position: relative; display: inline-flex; align-items: center; gap: 8px; padding: 7px 16px; border-radius: 999px; border: 0; color: var(--ink); background: var(--glass-2); isolation: isolate; overflow: hidden; font-size: 13px; }
-.shimmer::before { content: ""; position: absolute; inset: -1px; z-index: -2; border-radius: inherit; background: conic-gradient(from var(--a), transparent 0 60%, var(--mood) 80%, var(--mood-2) 90%, transparent); animation: spin 2.4s linear infinite; }
-.shimmer::after { content: ""; position: absolute; inset: 1px; z-index: -1; border-radius: inherit; background: var(--bg); }
-.shimmer:disabled { cursor: default; color: var(--ink-3); }
-.shimmer:disabled::before { animation: none; background: var(--edge-2); }
-.shimmer .spark { width: 14px; height: 14px; }
+.src { font-size: 12px; color: var(--ink-3); }
 
-.compose { position: relative; display: flex; gap: 10px; align-items: flex-end; }
-.field { position: relative; flex: 1; border-radius: 16px; padding: 1px; background: var(--edge); transition: background .3s; }
-.field:focus-within { background: conic-gradient(from var(--a), var(--mood), var(--mood-2), #6d5dfc, var(--mood)); animation: spin 4s linear infinite; }
-.field textarea { display: block; width: 100%; resize: none; min-height: 46px; max-height: 180px; font: 14.5px/1.45 var(--sans); color: var(--ink); background: color-mix(in srgb, var(--bg) 88%, transparent); border: 0; border-radius: 15px; padding: 12px 16px; outline: none; }
-.send { display: inline-flex; align-items: center; gap: 8px; height: 48px; padding: 0 18px; border: 0; border-radius: 16px; font-weight: 600; color: #0b0c10; background: linear-gradient(135deg, var(--ink), color-mix(in srgb, var(--ink) 70%, var(--mood))); box-shadow: 0 8px 24px -8px color-mix(in srgb, var(--mood) 60%, transparent); transition: transform .2s var(--ease); }
-:root[data-theme="light"] .send { color: #fff; }
-.send:hover { transform: translateY(-1px); } .send:active { transform: scale(.97); }
-.send:disabled { opacity: .35; cursor: default; transform: none; }
-.hint { font: 11px var(--mono); color: var(--ink-3); margin-top: 10px; display: flex; gap: 16px; flex-wrap: wrap; }
-.sent-note { margin: 0; font-size: 13px; color: var(--ink-2); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.sent-note .spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--edge-2); border-top-color: var(--tone); animation: rot 0.9s linear infinite; }
+.compose { display: flex; gap: 8px; align-items: flex-end; }
+.field { flex: 1; }
+.field textarea { display: block; width: 100%; resize: none; min-height: 38px; max-height: 180px; font: 14px/1.45 var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line-2); border-radius: 6px; padding: 8px 12px; outline: none; }
+.field textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.compose .btn { height: 38px; padding: 0 14px; }
+.hint { font-size: 12px; color: var(--ink-3); margin-top: 8px; display: flex; gap: 14px; flex-wrap: wrap; }
+.sent-note { margin: 0; font-size: 13px; color: var(--ink-2); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sent-note .spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--line-2); border-top-color: var(--ink-2); animation: rot .9s linear infinite; }
 @keyframes rot { to { transform: rotate(360deg); } }
 /* a reply the pane refused: the server's message, and the way out */
-.err { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 10px; padding: 8px 10px 8px 12px; border-radius: 12px; font-size: 13px; color: var(--ink); border: 1px solid color-mix(in srgb, var(--p) 45%, transparent); background: color-mix(in srgb, var(--p) 10%, var(--bg)); }
+.err { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 10px; padding: 6px 10px; border-radius: 6px; font-size: 13px; border: 1px solid var(--line-2); border-left: 3px solid var(--p); background: var(--bg); }
 .err b { color: var(--p); font-weight: 600; }
 .err span { flex: 1; min-width: 20ch; }
 
-/* ---------- dynamic island: the countdown after a reply ---------- */
-.island { position: fixed; left: 50%; bottom: 96px; z-index: 50; transform: translateX(-50%) translateY(30px) scale(.7); opacity: 0; pointer-events: none;
-  display: flex; align-items: center; gap: 14px; padding: 10px 10px 10px 12px; border-radius: 999px; background: #050507; color: #eef0f4; border: 1px solid rgba(255,255,255,.1);
-  box-shadow: 0 20px 50px -10px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.03), 0 0 60px -20px var(--mood); transition: transform .5s cubic-bezier(.3,1.4,.4,1), opacity .25s; overflow: hidden; max-width: min(640px, calc(100vw - 32px)); }
-.island.on { transform: translateX(-50%) translateY(0) scale(1); opacity: 1; pointer-events: auto; }
-.island .ringwrap { position: relative; width: 38px; height: 38px; flex: none; }
-.island svg { width: 38px; height: 38px; transform: rotate(-90deg); }
-.island circle { fill: none; stroke-width: 3; }
-.island .track { stroke: rgba(255,255,255,.1); }
-.island .prog { stroke: var(--mood); stroke-linecap: round; stroke-dasharray: 100; animation: ring linear forwards; filter: drop-shadow(0 0 4px var(--mood)); }
-@keyframes ring { to { stroke-dashoffset: 100; } }
-.island .secs { position: absolute; inset: 0; display: grid; place-items: center; font: 600 13px var(--mono); }
-.island .txt { min-width: 0; display: grid; gap: 1px; }
-.island .txt small { font: 500 10.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: rgba(238,240,244,.55); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.island .txt span { font: 600 14px var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.island button { flex: none; display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 8px 14px; font-size: 13px; border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.06); color: #eef0f4; }
-.island button:hover { background: rgba(255,255,255,.12); }
-.island button.go { background: #eef0f4; color: #050507; border-color: transparent; font-weight: 600; }
-.island kbd { color: inherit; background: transparent; border-color: currentColor; }
-.island .line { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: linear-gradient(90deg, var(--mood), var(--mood-2)); transform-origin: left; animation: drain linear forwards; }
+/* ---------- the countdown after a reply ---------- */
+.countdown { position: fixed; left: 50%; bottom: 84px; z-index: 50; transform: translateX(-50%); display: none; align-items: center; gap: 12px; padding: 8px 8px 8px 14px; border-radius: 8px; background: var(--bg); border: 1px solid var(--line-2); box-shadow: 0 4px 16px rgba(0,0,0,.18); overflow: hidden; max-width: min(640px, calc(100vw - 32px)); }
+.countdown.on { display: flex; }
+.countdown .secs { font: 500 13px var(--mono); color: var(--ink-3); min-width: 1.2em; text-align: center; }
+.countdown .txt { min-width: 0; display: grid; }
+.countdown .txt small { font-size: 12px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.countdown .txt span { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.countdown .btn { flex: none; }
+.countdown .line { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--ink-3); transform-origin: left; animation: drain linear forwards; }
 @keyframes drain { to { transform: scaleX(0); } }
 
-/* ---------- stacked toasts ---------- */
-.toasts { position: fixed; top: 64px; right: 18px; z-index: 55; display: grid; justify-items: end; gap: 8px; pointer-events: none; }
-.toast { max-width: 360px; font-size: 13px; padding: 10px 14px; border-radius: 14px; background: color-mix(in srgb, var(--bg) 70%, #222); color: var(--ink); border: 1px solid var(--edge-2); backdrop-filter: blur(16px); box-shadow: 0 12px 30px -10px rgba(0,0,0,.5); animation: tin .45s cubic-bezier(.3,1.4,.4,1); transition: opacity .3s, transform .3s; }
-:root[data-theme="light"] .toast { background: rgba(255,255,255,.9); }
-.toast.bad { border-color: color-mix(in srgb, var(--p) 55%, transparent); }
-.toast:nth-last-child(n+3) { opacity: .45; transform: scale(.94); }
-.toast.out { opacity: 0; transform: translateX(20px); }
-@keyframes tin { from { opacity: 0; transform: translateY(-10px) scale(.92); } }
+/* ---------- toasts ---------- */
+.toasts { position: fixed; top: 56px; right: 16px; z-index: 55; display: grid; justify-items: end; gap: 6px; pointer-events: none; }
+.toast { max-width: 360px; font-size: 13px; padding: 8px 12px; border-radius: 6px; background: var(--bg); color: var(--ink); border: 1px solid var(--line-2); box-shadow: 0 4px 16px rgba(0,0,0,.18); transition: opacity .2s; }
+.toast.bad { border-left: 3px solid var(--p); }
+.toast.out { opacity: 0; }
 
-/* ---------- overlays: command palette, help ---------- */
-.overlay { position: fixed; inset: 0; z-index: 70; display: none; place-items: start center; padding-top: 12vh; background: rgba(0,0,0,.45); backdrop-filter: blur(6px); }
-.overlay.on { display: grid; animation: fade .2s; }
-@keyframes fade { from { opacity: 0; } }
-.sheet { width: min(560px, 92vw); border-radius: 20px; background: color-mix(in srgb, var(--bg) 85%, #1c1d22); border: 1px solid var(--edge-2); box-shadow: 0 30px 80px -20px rgba(0,0,0,.7); overflow: hidden; animation: rise .35s var(--ease); }
-:root[data-theme="light"] .sheet { background: #fff; }
-.sheet input { width: 100%; border: 0; border-bottom: 1px solid var(--edge); background: transparent; color: var(--ink); font: 16px var(--sans); padding: 16px 20px; outline: none; }
-.plist { max-height: 50vh; overflow-y: auto; padding: 6px; }
-.popt { display: grid; grid-template-columns: 26px 1fr auto; gap: 10px; align-items: center; padding: 9px 12px; border-radius: 12px; cursor: pointer; }
-.popt .orb { width: 22px; height: 22px; grid-row: auto; } .popt .orb .st { width: 13px; height: 13px; font-size: 8px; right: -3px; bottom: -3px; }
-.popt.on { background: var(--glass-2); }
-.popt small { font: 11px var(--mono); color: var(--ink-3); }
-.pfoot { display: flex; gap: 14px; padding: 10px 16px; border-top: 1px solid var(--edge); font: 11px var(--mono); color: var(--ink-3); }
-.help dl { display: grid; grid-template-columns: auto 1fr; gap: 8px 18px; margin: 0; padding: 18px 22px 12px; font-size: 13px; }
-.help h2 { font: 700 18px var(--display); margin: 0; padding: 18px 22px 0; }
-/* failed replies */
-#failBtn { color: var(--p); border-color: color-mix(in srgb, var(--p) 45%, transparent); }
+/* ---------- overlays: jump list, help, failed replies ---------- */
+.overlay { position: fixed; inset: 0; z-index: 70; display: none; place-items: start center; padding-top: 12vh; background: rgba(0,0,0,.4); }
+.overlay.on { display: grid; }
+.sheet { width: min(560px, 92vw); border-radius: 8px; background: var(--bg); border: 1px solid var(--line-2); box-shadow: 0 12px 40px rgba(0,0,0,.3); overflow: hidden; }
+.sheet input { width: 100%; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--ink); font: 15px var(--sans); padding: 12px 16px; outline: none; }
+.plist { max-height: 50vh; overflow-y: auto; padding: 4px; }
+.popt { display: grid; grid-template-columns: 8px 1fr auto; gap: 10px; align-items: baseline; padding: 7px 12px; border-radius: 6px; cursor: pointer; }
+.popt .mark { grid-row: auto; margin-top: 0; }
+.popt.on { background: var(--surface-2); }
+.popt small { font-size: 12px; color: var(--ink-3); }
+.pfoot { display: flex; gap: 14px; padding: 8px 16px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-3); }
+.help h2 { font: 600 15px var(--sans); margin: 0; padding: 16px 20px 0; }
+.help dl { display: grid; grid-template-columns: auto 1fr; gap: 7px 16px; margin: 0; padding: 14px 20px 10px; font-size: 13px; }
+.help dt { text-align: right; }
+.help .prefs { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 4px 20px 16px; }
+#failBtn { color: var(--p); }
 #failBtn[hidden] { display: none; }
 .fails .sheet { width: min(760px, 94vw); }
-.flist { max-height: 60vh; overflow-y: auto; padding: 8px 22px 4px; }
-.fail { border: 1px solid var(--edge); border-radius: 14px; padding: 10px 14px; margin-bottom: 10px; }
+.flist { max-height: 60vh; overflow-y: auto; padding: 8px 20px 4px; }
+.fail { border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; margin-bottom: 8px; }
 .fail summary { cursor: pointer; font-size: 13px; line-height: 1.5; }
-.fail summary small { font: 11px var(--mono); color: var(--ink-3); }
+.fail summary small { font-size: 12px; color: var(--ink-3); }
 .fail .why { display: block; color: var(--ink-2); }
-.fail .why b { font: 600 11px var(--mono); color: var(--p); margin-right: 6px; }
+.fail .why b { font: 500 11.5px var(--mono); color: var(--p); margin-right: 6px; }
 .fail dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 10px 0 0; font-size: 12.5px; }
 .fail dt { color: var(--ink-3); }
 .fail dd { margin: 0; min-width: 0; }
-.fail pre { margin: 0; font: 11px/1.45 var(--mono); white-space: pre; overflow-x: auto; padding: 10px 12px; border-radius: 10px; background: rgba(0,0,0,.35); }
-:root[data-theme="light"] .fail pre { background: #1a1b20; color: #eef0f4; }
-.fempty { padding: 26px 0; color: var(--ink-3); font-size: 13px; }
-.help dt { text-align: right; }
-.help .prefs { display: flex; gap: 8px; flex-wrap: wrap; padding: 4px 22px 20px; }
+.fail pre { margin: 0; font: 11.5px/1.45 var(--mono); white-space: pre; overflow-x: auto; padding: 8px 10px; border-radius: 6px; background: var(--surface); border: 1px solid var(--line); }
+.fempty { padding: 24px 0; color: var(--ink-3); font-size: 13px; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
 </style>
 </head>
-<body data-mood="idle">
-<div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
-<div class="scrim" aria-hidden="true"></div>
-<div class="dots" aria-hidden="true"></div>
-<div class="grain" aria-hidden="true"></div>
+<body>
 
 <div class="app">
   <header class="top">
-    <div class="brand"><span class="logo" aria-hidden="true"></span><h1>Decision Center</h1><span id="badge" class="ticker" aria-label="unread"></span></div>
+    <div class="brand"><h1>Decision Center</h1><span id="badge" class="count" aria-label="unread"></span></div>
     <div class="seg" id="seg" role="tablist" aria-label="Filter">
-      <span class="pill"></span>
       <button data-f="all" class="on">All<b></b></button><button data-f="waiting">Waiting<b></b></button><button data-f="done">Finished<b></b></button>
     </div>
     <span class="spacer"></span>
     <span class="conn" id="conn" role="status"><i></i><span>Connecting</span></span>
-    <button class="pillbtn" id="paletteBtn" title="Jump to a session">Jump to <kbd>⌘K</kbd></button>
-    <button class="pillbtn" id="failBtn" title="Replies that didn't go through" hidden>Failed <b id="failCount">0</b></button>
-    <button class="pillbtn" id="nextBtn" title="Next unread item">Next <kbd>n</kbd></button>
-    <button class="pillbtn" id="helpBtn" title="Keyboard shortcuts and settings"><kbd>?</kbd></button>
+    <button class="btn" id="paletteBtn" title="Jump to a session">Jump to <kbd>⌘K</kbd></button>
+    <button class="btn" id="failBtn" title="Replies that didn't go through" hidden>Failed <b id="failCount">0</b></button>
+    <button class="btn" id="nextBtn" title="Next unread item">Next <kbd>n</kbd></button>
+    <button class="btn" id="helpBtn" title="Keyboard shortcuts and settings"><kbd>?</kbd></button>
   </header>
   <div class="banner" id="banner" role="alert"></div>
   <div class="main" id="main">
@@ -346,7 +248,7 @@ header.top { display: flex; align-items: center; gap: 16px; padding: 14px 20px; 
   </div>
 </div>
 
-<div class="island" id="island" role="status"></div>
+<div class="countdown" id="countdown" role="status"></div>
 <div class="toasts" id="toasts" aria-live="polite"></div>
 
 <div class="overlay" id="palette"><div class="sheet">
@@ -358,7 +260,7 @@ header.top { display: flex; align-items: center; gap: 16px; padding: 14px 20px; 
 <div class="overlay help fails" id="fails"><div class="sheet">
   <h2>Failed replies</h2>
   <div class="flist" id="flist"></div>
-  <div class="prefs"><button class="pillbtn" id="failCopy">Copy report</button><button class="pillbtn" id="failClear">Clear</button><span class="src">Kept on this Mac only: the last 50, with the keys typed and the pane's screen.</span></div>
+  <div class="prefs"><button class="btn" id="failCopy">Copy report</button><button class="btn" id="failClear">Clear</button><span class="src">Kept on this Mac only: the last 50, with the keys typed and the pane's screen.</span></div>
 </div></div>
 <div class="overlay help" id="help"><div class="sheet">
   <h2>Keyboard</h2>
@@ -378,7 +280,7 @@ header.top { display: flex; align-items: center; gap: 16px; padding: 14px 20px; 
     <dt><kbd>o</kbd></dt><dd>Show the session's tmux pane</dd>
     <dt><kbd>!</kbd></dt><dd>Failed replies: what was sent, the keys typed, and the pane's screen</dd>
   </dl>
-  <div class="prefs"><button class="pillbtn" id="themeBtn"></button><button class="pillbtn" id="densityBtn"></button></div>
+  <div class="prefs"><button class="btn" id="themeBtn"></button><button class="btn" id="densityBtn"></button></div>
 </div></div>
 
 <script>
@@ -390,7 +292,7 @@ const min = 60e3;
 // ---------------------------------------------------------------- state
 let snap = null;          // last FeedSnapshot from the server
 let items = [];           // snapshot items plus local state, what the page draws
-let selId = null, advancing = null, filter = "all", lastDetail = null, firstPaint = true;
+let selId = null, advancing = null, filter = "all", lastDetail = null;
 let conn = "connecting", failures = 0, lastLiveAt = null;
 const picks = {}, drafts = {}, expanded = {}, suggestions = {};
 const errors = {};        // id -> { since, message } for a reply the pane refused
@@ -406,7 +308,6 @@ const GROUPS = [
   { key: "done", label: "Finished", test: i => i.kind === "finished" },
   { key: "closed", label: "Session closed", test: i => i.kind === "closed" },
 ];
-const GLYPH = { question: "?", permission: "!", done: "✓", closed: "×", working: "…" };
 const STATE_LABEL = { question: "Question", permission: "Permission", done: "Finished", closed: "Closed", working: "Working" };
 const isSent = i => sent[i.id]?.since === i.since;
 const busy = i => isSent(i) || advancing?.from === i.id || !!posting[i.id];
@@ -480,7 +381,7 @@ async function post(path, body) {
   try {
     res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   } catch {
-    return { ok: false, error: { code: "offline", message: "Decision Center isn't running. Run Decision Center: Open from ⌘J, then try again." } };
+    return { ok: false, error: { code: "offline", message: "Decision Center isn't running. Run decision-center serve in a terminal, then try again." } };
   }
   try { return await res.json(); } catch { return { ok: false, error: { code: "bad_response", message: `the server answered ${res.status}` } }; }
 }
@@ -508,31 +409,21 @@ function md(src, markNext) {
   return out.join("");
 }
 
-// ---------------------------------------------------------------- number ticker
-function ticker(el, n) {
-  const s = String(n);
-  if (el.childElementCount !== s.length) el.innerHTML = [...s].map(() => `<span class="dg"><span class="col">${[...Array(10).keys()].map(d => `<span>${d}</span>`).join("")}</span></span>`).join("");
-  [...el.querySelectorAll(".col")].forEach((c, k) => requestAnimationFrame(() => c.style.transform = `translateY(-${+s[k]}em)`));
-  el.classList.toggle("zero", !n);
-  el.setAttribute("aria-label", n + " unread");
-}
-
 // ---------------------------------------------------------------- render
 function render() {
   const unread = items.filter(i => i.unread).length;
-  ticker($("#badge"), unread);
+  const badge = $("#badge");
+  badge.textContent = unread + " unread";
+  badge.classList.toggle("zero", !unread);
   document.title = (unread ? `(${unread}) ` : "") + "Decision Center";
   const all = visible();
   const counts = { all: all.filter(i => i.kind !== "closed").length, waiting: all.filter(GROUPS[0].test).length, done: all.filter(GROUPS[1].test).length };
   document.querySelectorAll("#seg button").forEach(b => { b.querySelector("b").textContent = counts[b.dataset.f]; b.classList.toggle("on", b.dataset.f === filter); });
-  moveSegPill();
   renderFeed();
   renderDetail();
-  document.body.dataset.mood = sel() ? stateKey(sel()) : "idle";
 }
-function moveSegPill() { const on = $("#seg button.on"), pill = $("#seg .pill"); if (on) { pill.style.left = on.offsetLeft + "px"; pill.style.width = on.offsetWidth + "px"; } }
 
-// Keyed feed with FLIP reordering, so cards glide instead of jumping (animated list).
+// Keyed feed: a card keeps its element across snapshots, so focus and scroll stay put.
 const cardEls = new Map();
 function renderFeed() {
   const feed = $("#feed"), list = shown();
@@ -541,53 +432,44 @@ function renderFeed() {
   for (const g of GROUPS) {
     const rows = list.filter(g.test); if (!rows.length) continue;
     const action = g.key === "done" ? `<button data-act="dismiss-finished" title="Shift+X">dismiss all</button>` : g.key === "closed" ? `<button data-act="dismiss-closed">clear</button>` : "";
-    want.push(["g:" + g.key, () => `${g.label} · ${rows.length}<span class="rule"></span>${action}`, "group-h"]);
+    want.push(["g:" + g.key, () => `<span>${g.label} · ${rows.length}</span>${action}`, "group-h"]);
     rows.forEach(i => want.push([i.id, () => cardInner(i), cardClass(i)]));
   }
-  const before = new Map(); cardEls.forEach((el, k) => before.set(k, el.getBoundingClientRect().top));
   const keep = new Set(want.map(w => w[0]));
-  cardEls.forEach((el, k) => { if (!keep.has(k)) { cardEls.delete(k); exit(el); } });
-  let cursor = feed.firstElementChild, idx = 0;
+  cardEls.forEach((el, k) => { if (!keep.has(k)) { cardEls.delete(k); el.remove(); } });
+  let cursor = feed.firstElementChild;
   for (const [key, html, cls] of want) {
-    let el = cardEls.get(key), isNew = false;
-    if (!el) { el = document.createElement("div"); el.dataset.key = key; cardEls.set(key, el); isNew = true; }
+    let el = cardEls.get(key);
+    if (!el) { el = document.createElement("div"); el.dataset.key = key; cardEls.set(key, el); }
     const h = html(); if (el._h !== h) { el.innerHTML = h; el._h = h; }
     el.className = cls;
     if (!key.startsWith("g:") && key !== "empty") { el.dataset.id = key; el.setAttribute("role", "button"); el.tabIndex = -1; }
-    while (cursor && cursor.classList.contains("exiting")) cursor = cursor.nextElementSibling;
     if (el !== cursor) feed.insertBefore(el, cursor); else cursor = cursor.nextElementSibling;
-    if (isNew) el.animate([{ opacity: 0, transform: "translateY(-10px) scale(.97)", filter: "blur(6px)" }, { opacity: 1, transform: "none", filter: "none" }], { duration: 480, delay: firstPaint ? idx * 45 : 0, easing: "cubic-bezier(.2,.8,.2,1)", fill: "backwards" });
-    idx++;
   }
-  cardEls.forEach((el, k) => { const b = before.get(k); if (b == null) return; const d = b - el.getBoundingClientRect().top; if (Math.abs(d) > 1) el.animate([{ transform: `translateY(${d}px)` }, { transform: "none" }], { duration: 420, easing: "cubic-bezier(.2,.8,.2,1)" }); });
-  if (snap) firstPaint = false;
-}
-function exit(el) {
-  el.classList.add("exiting");
-  const h = el.offsetHeight;
-  el.animate([{ opacity: 1, height: h + "px", transform: "none" }, { opacity: 0, height: "0px", marginTop: 0, marginBottom: 0, paddingTop: 0, paddingBottom: 0, transform: "translateX(-16px)" }], { duration: 320, easing: "cubic-bezier(.4,0,.2,1)" }).onfinish = () => el.remove();
 }
 function cardClass(i) {
-  const k = stateKey(i), waiting = !busy(i) && GROUPS[0].test(i);
-  return ["card spot", "s-" + k, i.unread && "unread", i.id === selId && "sel", isSent(i) && "sent", (advancing?.from === i.id || posting[i.id]) && "queued", i.unread && waiting && "beam"].filter(Boolean).join(" ");
+  return ["card", "s-" + stateKey(i), i.unread && "unread", i.id === selId && "sel", isSent(i) && "sent", (advancing?.from === i.id || posting[i.id]) && "queued"].filter(Boolean).join(" ");
 }
-function orb(i) { return `<span class="orb ${i.agent}"><span class="st">${GLYPH[stateKey(i)]}</span></span>`; }
+const MARK = `<span class="mark"></span>`;
+// Why a word: the dot's colour alone must not carry the state.
+const KIND_WORD = { question: "Question", permission: "Permission", closed: "Closed" };
 function previewOf(i) {
   if (i.kind === "question") return i.question.title + (multiPart(i) ? ` (+${i.question.more.length} more)` : "");
   if (i.kind === "permission") return `${i.permission.toolName}: ${i.permission.summary}`;
   return (i.lastMessage || "").replace(/[*`#|]/g, "").split("\n").find(l => l.trim()) || "No message yet";
 }
 function cardInner(i) {
-  return `${cardClass(i).includes("beam") ? `<span class="ring"></span>` : ""}${orb(i)}
-    <span class="title">${where(i)}${i.kind === "closed" ? `<span class="tag">closed</span>` : ""}</span>
-    <span class="when">${ago(i.since)}</span>
-    <span class="preview">${esc(previewOf(i))}</span>`;
+  const word = busy(i) ? "" : KIND_WORD[i.kind];
+  return `${MARK}
+    <span class="title">${where(i)}</span>
+    <span class="when">${i.agent} · <time>${ago(i.since)}</time></span>
+    <span class="preview">${word ? `<i>${word}</i> · ` : ""}${esc(previewOf(i))}</span>`;
 }
 
 function renderDetail() {
   const d = $("#detail"), i = sel();
   $("#main").classList.toggle("detail-open", !!i);
-  if (!i) { lastDetail = null; d.innerHTML = `<div></div><div class="d-body"><div class="empty reveal"><strong>Pick a session</strong><div>Press <kbd>n</kbd> for the next thing waiting on you, or <kbd>⌘K</kbd> to jump.</div></div></div><div></div>`; return; }
+  if (!i) { lastDetail = null; d.innerHTML = `<div></div><div class="d-body"><div class="empty"><strong>Pick a session</strong><div>Press <kbd>n</kbd> for the next thing waiting on you, or <kbd>⌘K</kbd> to jump.</div></div></div><div></div>`; return; }
   const fresh = lastDetail !== i.id; lastDetail = i.id;
   const focusedBox = document.activeElement?.matches?.("#detail textarea");
   const k = stateKey(i), live = i.kind !== "closed" && !busy(i);
@@ -598,41 +480,40 @@ function renderDetail() {
     if (inPaneOnly(i)) {
       ask = `<div class="ask s-question"><p class="label">Several questions</p><h3>${esc(q.title)}</h3>
         <div class="sub">This asks ${partsOf(i).length} questions at once${i.agent === "claude" ? ", and some have no options to pick" : ""}. Answer them in the pane.</div>
-        <button class="shimmer" data-act="open">Open pane <kbd>o</kbd></button></div>`;
+        <button class="btn" data-act="open">Open pane <kbd>o</kbd></button></div>`;
     } else if (multiPart(i)) {
       const qs = partsOf(i), all = partPicks[i.id] || [], a = activePart[i.id] || 0;
       ask = `<div class="ask s-question"><p class="label">${qs.length} questions</p>
         <div class="sub">Pick an answer for each, then send them together. The digits pick in the highlighted question, and <kbd>←</kbd> <kbd>→</kbd> move between questions.</div>
         ${qs.map((part, p) => `<div class="part ${p === a ? "active" : ""}"><p class="label">${p + 1} of ${qs.length}${part.header ? " · " + esc(part.header) : ""} · ${part.multiSelect ? "pick one or more" : "pick one"}</p><h3>${esc(part.title)}</h3>
-          <div class="tiles">${part.options.map((o, n) => { const on = !!all[p]?.has(n); return `<button class="tile spot ${on ? "picked" : ""}" data-act="part-opt" data-p="${p}" data-n="${n}" aria-pressed="${on}"><span class="k">${o.index}</span><span class="t">${esc(o.label)}</span>${o.description ? `<span class="d">${esc(o.description)}</span>` : ""}</button>`; }).join("")}</div></div>`).join("")}</div>`;
+          <div class="tiles">${part.options.map((o, n) => { const on = !!all[p]?.has(n); return `<button class="tile ${on ? "picked" : ""}" data-act="part-opt" data-p="${p}" data-n="${n}" aria-pressed="${on}"><span class="k">${o.index}</span><span class="t">${esc(o.label)}</span>${o.description ? `<span class="d">${esc(o.description)}</span>` : ""}</button>`; }).join("")}</div></div>`).join("")}</div>`;
     } else if (!q.options.length) {
       ask = `<div class="ask s-question"><p class="label">Question</p><h3>${esc(q.title)}</h3><div class="sub">No options to pick. Type your answer below.</div></div>`;
     } else {
       const sub = multiPick(i) ? "Toggle with the digits, then send. A typed answer goes in the pane." : "It's sent as its digit. Or type your own answer below.";
       ask = `<div class="ask s-question"><p class="label">${multiPick(i) ? "Pick one or more" : "Pick one"}</p><h3>${esc(q.title)}</h3>
         <div class="sub">${sub}</div>
-        <div class="tiles">${q.options.map((o, n) => `<button class="tile spot ${p.has(n) ? "picked" : ""}" data-act="opt" data-n="${n}" aria-pressed="${p.has(n)}"><span class="k">${o.index}</span><span class="t">${esc(o.label)}</span>${o.description ? `<span class="d">${esc(o.description)}</span>` : ""}</button>`).join("")}</div></div>`;
+        <div class="tiles">${q.options.map((o, n) => `<button class="tile ${p.has(n) ? "picked" : ""}" data-act="opt" data-n="${n}" aria-pressed="${p.has(n)}"><span class="k">${o.index}</span><span class="t">${esc(o.label)}</span>${o.description ? `<span class="d">${esc(o.description)}</span>` : ""}</button>`).join("")}</div></div>`;
     }
   }
   if (live && i.kind === "permission") ask = `<div class="ask s-permission"><p class="label">Permission</p><h3>Allow ${esc(i.permission.toolName)} to run this?</h3>
       <div class="term">${esc(i.permission.summary || "(no details)")}</div>
-      <div class="tiles"><button class="tile spot" data-act="allow"><span class="k">1</span><span class="t">Allow</span><span class="d">Run it this once</span></button><button class="tile spot" data-act="deny"><span class="k">2</span><span class="t">Deny</span><span class="d">Stop it. Say why in the note</span></button></div>
+      <div class="tiles"><button class="tile" data-act="allow"><span class="k">1</span><span class="t">Allow</span><span class="d">Run it this once</span></button><button class="tile" data-act="deny"><span class="k">2</span><span class="t">Deny</span><span class="d">Stop it. Say why in the note</span></button></div>
       <div class="note">A note typed below goes to ${esc(i.agent)} with your answer. "Always allow" rules are set in the pane.</div></div>`;
   d.innerHTML = `
-    <div class="d-head s-${k} ${fresh ? "reveal" : ""}">
-      <button class="pillbtn back" data-act="back" aria-label="Back to the feed">←</button>
+    <div class="d-head s-${k}">
+      <button class="btn back" data-act="back" aria-label="Back to the feed">←</button>
       <div class="where">
         <h2>${esc(i.project)} <span>/ ${esc(i.title)}</span></h2>
-        <div class="meta"><span class="statepill"><i></i>${STATE_LABEL[k]}</span><span class="chipmeta"><i class="adot ${i.agent}"></i>${i.agent}</span><span>${ago(i.since) === "now" ? "just now" : ago(i.since) + " ago"}</span></div>
+        <div class="meta"><span class="state">${STATE_LABEL[k]}</span><span>${i.agent}</span><span>${ago(i.since) === "now" ? "just now" : ago(i.since) + " ago"}</span></div>
       </div>
-      <span class="spacer"></span>
-      ${i.kind === "closed" || !i.terminal ? "" : `<button class="pillbtn" data-act="open">Open pane <kbd>o</kbd></button>`}
-      <button class="pillbtn" data-act="dismiss">Dismiss <kbd>x</kbd></button>
+      ${i.kind === "closed" || !i.terminal ? "" : `<button class="btn" data-act="open">Open pane <kbd>o</kbd></button>`}
+      <button class="btn" data-act="dismiss">Dismiss <kbd>x</kbd></button>
     </div>
-    <div class="d-body s-${k} ${fresh ? "reveal" : ""}">
+    <div class="d-body s-${k}">
       <p class="label">Last message</p>
-      <div class="glasscard spot"><div class="msg ${isLong && !open ? "clamp" : ""}">${md(msg, i.kind === "finished")}</div>
-      ${isLong ? `<button class="pillbtn more" data-act="expand">${open ? "Show less" : "Show the full message"}</button>` : ""}</div>
+      <div class="msgbox"><div class="msg ${isLong && !open ? "clamp" : ""}">${md(msg, i.kind === "finished")}</div>
+      ${isLong ? `<button class="btn more" data-act="expand">${open ? "Show less" : "Show the full message"}</button>` : ""}</div>
       ${ask}
     </div>
     ${dockHtml(i)}`;
@@ -642,7 +523,7 @@ function renderDetail() {
 
 function errorRow(i) {
   const e = errors[i.id]; if (!e) return "";
-  return `<div class="err" role="alert"><b>Not sent.</b><span>${esc(e.message)}</span><button class="pillbtn" data-act="fail-details">Details <kbd>!</kbd></button>${i.kind !== "closed" && i.terminal ? `<button class="pillbtn" data-act="open">Open pane <kbd>o</kbd></button>` : ""}</div>`;
+  return `<div class="err" role="alert"><b>Not sent.</b><span>${esc(e.message)}</span><button class="btn" data-act="fail-details">Details <kbd>!</kbd></button>${i.kind !== "closed" && i.terminal ? `<button class="btn" data-act="open">Open pane <kbd>o</kbd></button>` : ""}</div>`;
 }
 function dockHtml(i) {
   const k = stateKey(i);
@@ -651,28 +532,28 @@ function dockHtml(i) {
   if (advancing?.from === i.id) return `<div class="dock s-${k}"><p class="sent-note"><span class="spin"></span>Sending <b>${esc(advancing.label)}</b> when the countdown ends. <kbd>Esc</kbd> to undo and stay.</p></div>`;
   if (posting[i.id]) return `<div class="dock s-${k}"><p class="sent-note"><span class="spin"></span>Sending <b>${esc(posting[i.id].label)}</b>…</p></div>`;
   if (isSent(i)) return `<div class="dock s-${k}"><p class="sent-note"><span class="spin"></span>Sent <b>${esc(sent[i.id].label)}</b>. ${i.agent} is working. This item leaves the feed when you move on.</p></div>`;
-  if (inPaneOnly(i)) return `<div class="dock s-${k}">${errorRow(i)}<p class="sent-note">Answer these questions in the pane. <button class="pillbtn" data-act="open">Open pane <kbd>o</kbd></button></p></div>`;
+  if (inPaneOnly(i)) return `<div class="dock s-${k}">${errorRow(i)}<p class="sent-note">Answer these questions in the pane. <button class="btn" data-act="open">Open pane <kbd>o</kbd></button></p></div>`;
   if (i.kind === "permission") return `<div class="dock s-${k}">${errorRow(i)}
-    <div class="compose"><div class="field"><textarea rows="1" placeholder="Optional note for ${esc(i.agent)}…" aria-label="Note"></textarea></div><button class="send" data-act="allow">Allow <kbd style="color:inherit;border-color:currentColor;background:none">1</kbd></button><button class="pillbtn" data-act="deny">Deny <kbd>2</kbd></button></div>
+    <div class="compose"><div class="field"><textarea rows="1" placeholder="Optional note for ${esc(i.agent)}…" aria-label="Note"></textarea></div><button class="btn primary" data-act="allow">Allow <kbd>1</kbd></button><button class="btn" data-act="deny">Deny <kbd>2</kbd></button></div>
     <div class="hint"><span><kbd>1</kbd> allow</span><span><kbd>2</kbd> deny</span><span><kbd>r</kbd> write a note, <kbd>Esc</kbd> to leave it</span><span><kbd>n</kbd> next</span></div></div>`;
   let top = "";
   if (multiPart(i)) {
     const qs = partsOf(i), all = partPicks[i.id] || [], done = qs.filter((_, p) => all[p]?.size).length;
-    top = `<div class="row"><button class="shimmer" data-act="submit-parts" ${partsDone(i) ? "" : "disabled"}>Send answers <kbd>↵</kbd></button><span class="src">${done === qs.length ? esc(partsLabel(i)) : `${done} of ${qs.length} answered`}</span></div>`;
+    top = `<div class="row"><button class="btn primary" data-act="submit-parts" ${partsDone(i) ? "" : "disabled"}>Send answers <kbd>↵</kbd></button><span class="src">${done === qs.length ? esc(partsLabel(i)) : `${done} of ${qs.length} answered`}</span></div>`;
   } else if (multiPick(i)) {
     const p = picks[i.id] || new Set();
-    top = `<div class="row"><button class="shimmer" data-act="submit-multi" ${p.size ? "" : "disabled"}>Send ${p.size ? p.size + " picked" : "picks"}</button><span class="src">${p.size ? [...p].map(x => esc(i.question.options[x].label)).join(" + ") : "Nothing picked yet"}</span></div>`;
+    top = `<div class="row"><button class="btn primary" data-act="submit-multi" ${p.size ? "" : "disabled"}>Send ${p.size ? p.size + " picked" : "picks"}</button><span class="src">${p.size ? [...p].map(x => esc(i.question.options[x].label)).join(" + ") : "Nothing picked yet"}</span></div>`;
   } else if (i.kind === "finished") {
     const gen = suggestions[i.id + "@" + episode(i)];
     const props = i.proposals.length ? i.proposals : Array.isArray(gen) ? gen : [];
-    if (gen === "loading") top = `<div class="row"><span class="shimmer-text">Asking Haiku for replies</span><span class="skel"></span><span class="skel"></span><span class="skel"></span></div>`;
+    if (gen === "loading") top = `<div class="row"><span class="src">Asking Haiku for replies…</span></div>`;
     else if (props.length) top = `<div class="row">${props.map((p, n) => `<button class="prop" data-act="prop" data-n="${n}"><span class="k">${n + 1}</span><span class="t">${esc(p)}</span></button>`).join("")}<span class="src">${i.proposals.length ? "from the message" : "suggested by Haiku"}</span></div>`;
-    else if (i.canSuggest) top = `<div class="row"><button class="shimmer" data-act="suggest"><svg class="spark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z"/></svg>Suggest replies <kbd>s</kbd></button><span class="src">No next actions found in the message</span></div>`;
+    else if (i.canSuggest) top = `<div class="row"><button class="btn" data-act="suggest">Suggest replies <kbd>s</kbd></button><span class="src">No next actions found in the message</span></div>`;
   }
-  if (!takesText(i)) return `<div class="dock s-${k}">${errorRow(i)}${top}<div class="row"><span class="src">${multiPart(i) ? "Typed answers to these questions go in the pane." : "Typed answers to multi-select questions go in the pane."}</span><button class="pillbtn" data-act="open">Open pane <kbd>o</kbd></button></div></div>`;
+  if (!takesText(i)) return `<div class="dock s-${k}">${errorRow(i)}${top}<div class="row"><span class="src">${multiPart(i) ? "Typed answers to these questions go in the pane." : "Typed answers to multi-select questions go in the pane."}</span><button class="btn" data-act="open">Open pane <kbd>o</kbd></button></div></div>`;
   const placeholder = i.kind === "question" ? (i.question.options.length ? "Other: type your own answer…" : "Type your answer…") : "Reply to " + i.agent + "…";
   return `<div class="dock s-${k}">${errorRow(i)}${top}
-    <div class="compose"><div class="field"><textarea rows="1" placeholder="${placeholder}" aria-label="Reply"></textarea></div><button class="send" data-act="send">Send <kbd style="color:inherit;border-color:currentColor;background:none">↵</kbd></button></div>
+    <div class="compose"><div class="field"><textarea rows="1" placeholder="${placeholder}" aria-label="Reply"></textarea></div><button class="btn primary" data-act="send">Send <kbd>↵</kbd></button></div>
     <div class="hint"><span><kbd>Enter</kbd> send</span><span><kbd>Shift</kbd>+<kbd>Enter</kbd> new line</span><span><kbd>Esc</kbd> back to feed</span><span><kbd>n</kbd> next</span></div></div>`;
 }
 function autosize(ta) { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 180) + "px"; }
@@ -724,7 +605,7 @@ async function openPane(i) {
   toast(r.ok ? `Showing ${short(i)} in tmux.` : "Couldn't open the pane: " + r.error.message, !r.ok);
 }
 
-// ---- every reply gets one countdown, shown in the dynamic island; the reply is held until it runs out.
+// ---- every reply gets one countdown, shown in a bar over the detail pane; the reply is held until it runs out.
 // Undo (Esc) cancels the reply and you stay with your draft. Timeout sends it and goes to the next item in the queue.
 function send(i, label, reply) {
   if (!i.terminal) return toast(NOT_IN_TMUX, true);
@@ -736,10 +617,10 @@ function send(i, label, reply) {
   advancing = { from: i.id, to: next?.id, label, reply, draft, item: i, timer: setTimeout(finish, COUNTDOWN_MS),
     tick: setInterval(() => { const el = $("#isecs"); if (el) el.textContent = Math.max(1, Math.ceil((end - Date.now()) / 1000)); }, 100) };
   render();
-  const isl = $("#island");
-  isl.innerHTML = `<span class="ringwrap"><svg viewBox="0 0 36 36" aria-hidden="true"><circle class="track" r="15" cx="18" cy="18"/><circle class="prog" r="15" cx="18" cy="18" pathLength="100" style="animation-duration:${COUNTDOWN_MS}ms"/></svg><span class="secs" id="isecs">${COUNTDOWN_MS / 1000}</span></span>
-    <span class="txt"><small>Sending ${esc(label)}</small><span>${next ? `then ${GLYPH[stateKey(next)]} ${esc(next.project)} / ${esc(next.title)} →` : `to ${esc(i.project)} / ${esc(i.title)}`}</span></span>
-    <button data-act="stay">Undo <kbd>Esc</kbd></button><button class="go" data-act="go-next">Send now <kbd>↵</kbd></button>
+  const isl = $("#countdown");
+  isl.innerHTML = `<span class="secs" id="isecs">${COUNTDOWN_MS / 1000}</span>
+    <span class="txt"><small>Sending ${esc(label)}</small><span>${next ? `then ${esc(next.project)} / ${esc(next.title)}` : `to ${esc(i.project)} / ${esc(i.title)}`}</span></span>
+    <button class="btn" data-act="stay">Undo <kbd>Esc</kbd></button><button class="btn primary" data-act="go-next">Send now <kbd>↵</kbd></button>
     <i class="line" style="animation-duration:${COUNTDOWN_MS}ms"></i>`;
   const r = $("#detail").getBoundingClientRect(); isl.style.left = (r.width ? r.left + r.width / 2 : innerWidth / 2) + "px"; // centre over the detail pane
   isl.classList.add("on");
@@ -747,7 +628,7 @@ function send(i, label, reply) {
 function nextInQueue(fromId) { return visible().find(x => x.id !== fromId && x.kind !== "closed" && !busy(x)); }
 function stopCountdown() {
   const c = advancing; if (!c) return null;
-  clearTimeout(c.timer); clearInterval(c.tick); advancing = null; $("#island").classList.remove("on");
+  clearTimeout(c.timer); clearInterval(c.tick); advancing = null; $("#countdown").classList.remove("on");
   return c;
 }
 // The countdown ran out (or you moved on): POST the reply. Resolves true when the pane took it.
@@ -785,7 +666,6 @@ function cancelCountdown(quiet) {
 }
 function pickOption(i, n) {
   const o = i.question.options[n]; if (!o || multiPart(i)) return;
-  document.querySelector(`.tile[data-n="${n}"]`)?.classList.add("pressed");
   if (multiPick(i)) { const p = picks[i.id] = picks[i.id] || new Set(); p.has(n) ? p.delete(n) : p.add(n); render(); return; }
   send(i, `“${o.label}”`, { type: "option", indexes: [o.index] });
 }
@@ -904,7 +784,7 @@ function toast(m, bad) {
   const box = $("#toasts"), t = document.createElement("div");
   t.className = "toast" + (bad ? " bad" : ""); t.textContent = m; box.appendChild(t);
   while (box.children.length > 4) box.firstElementChild.remove();
-  setTimeout(() => { t.classList.add("out"); setTimeout(() => t.remove(), 300); }, bad ? 6000 : 2800);
+  setTimeout(() => { t.classList.add("out"); setTimeout(() => t.remove(), 200); }, bad ? 6000 : 2800);
 }
 
 // ---------------------------------------------------------------- settings: theme follows the system unless set
@@ -930,7 +810,7 @@ function closePalette() { $("#palette").classList.remove("on"); }
 function paletteList() { const q = $("#pq").value.toLowerCase(); return visible().filter(i => (i.project + " " + i.title + " " + i.agent + " " + previewOf(i)).toLowerCase().includes(q)); }
 function renderPalette() {
   const l = paletteList(); pIdx = Math.min(pIdx, Math.max(0, l.length - 1));
-  $("#plist").innerHTML = l.length ? l.map((i, n) => `<div class="popt s-${stateKey(i)} ${n === pIdx ? "on" : ""}" data-pid="${esc(i.id)}">${orb(i)}<span>${where(i)}<br><small>${esc(previewOf(i).slice(0, 80))}</small></span><small>${STATE_LABEL[stateKey(i)]}</small></div>`).join("")
+  $("#plist").innerHTML = l.length ? l.map((i, n) => `<div class="popt s-${stateKey(i)} ${n === pIdx ? "on" : ""}" data-pid="${esc(i.id)}">${MARK}<span>${where(i)}<br><small>${esc(previewOf(i).slice(0, 80))}</small></span><small>${STATE_LABEL[stateKey(i)]}</small></div>`).join("")
     : `<div class="empty" style="padding:30px">No session matches.</div>`;
   $("#plist .popt.on")?.scrollIntoView({ block: "nearest" });
 }
@@ -944,13 +824,6 @@ $("#pq").addEventListener("keydown", e => {
 $("#plist").addEventListener("click", e => { const o = e.target.closest(".popt"); if (o) { closePalette(); filter = "all"; select(o.dataset.pid); } });
 
 // ---------------------------------------------------------------- events
-document.addEventListener("pointermove", e => {
-  const s = e.target.closest?.(".spot");
-  if (s) { const r = s.getBoundingClientRect(); s.style.setProperty("--mx", e.clientX - r.left + "px"); s.style.setProperty("--my", e.clientY - r.top + "px"); }
-  const t = e.target.closest?.(".tile");
-  if (t) { const r = t.getBoundingClientRect(); t.style.setProperty("--ry", ((e.clientX - r.left) / r.width - .5) * 8 + "deg"); t.style.setProperty("--rx", -((e.clientY - r.top) / r.height - .5) * 8 + "deg"); }
-});
-document.addEventListener("pointerout", e => { const t = e.target.closest?.(".tile"); if (t && !t.contains(e.relatedTarget)) { t.style.setProperty("--rx", "0deg"); t.style.setProperty("--ry", "0deg"); } });
 document.addEventListener("click", e => {
   if (e.target.classList.contains("overlay")) return e.target.classList.remove("on");
   const seg = e.target.closest("#seg button"); if (seg) { filter = seg.dataset.f; if (sel() && !inFilter(sel())) selId = null; return render(); }
@@ -1025,9 +898,7 @@ document.addEventListener("keydown", e => {
 $("#nextBtn").onclick = nextWaiting;
 $("#helpBtn").onclick = () => $("#help").classList.add("on");
 $("#paletteBtn").onclick = openPalette;
-addEventListener("resize", moveSegPill);
-document.fonts?.ready.then(moveSegPill);
-setInterval(() => document.querySelectorAll(".card[data-id] .when").forEach(el => { const it = items.find(x => x.id === el.closest(".card").dataset.id); if (it) el.textContent = ago(it.since); }), 30e3);
+setInterval(() => document.querySelectorAll(".card[data-id] .when time").forEach(el => { const it = items.find(x => x.id === el.closest(".card").dataset.id); if (it) el.textContent = ago(it.since); }), 30e3);
 render();
 connect();
 loadFailures();
