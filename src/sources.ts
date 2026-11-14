@@ -58,8 +58,9 @@ function partFromRaw(raw: RawQuestion): FeedQuestion {
  * Claude's AskUserQuestion input and Codex's request_user_input share this
  * shape, near enough. The first question carries the rest in `more`.
  */
-export function questionFromArgs(args: { questions?: RawQuestion[] } | null | undefined): FeedQuestion | null {
-  const [first, ...rest] = (args?.questions ?? []).filter(Boolean)
+export function questionFromArgs(args: { questions?: unknown } | null | undefined): FeedQuestion | null {
+  const list: unknown[] = Array.isArray(args?.questions) ? args.questions : []
+  const [first, ...rest] = list.filter((raw): raw is RawQuestion => !!raw && typeof raw === 'object')
   if (!first) {
     return null
   }

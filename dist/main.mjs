@@ -355,7 +355,8 @@ function partFromRaw(raw) {
   return { title: title || "Question", ...header ? { header } : {}, multiSelect: raw.multiSelect === true, options };
 }
 function questionFromArgs(args) {
-  const [first, ...rest] = (args?.questions ?? []).filter(Boolean);
+  const list = Array.isArray(args?.questions) ? args.questions : [];
+  const [first, ...rest] = list.filter((raw) => !!raw && typeof raw === "object");
   if (!first) {
     return null;
   }
