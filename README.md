@@ -72,7 +72,7 @@ The home folder is `~/.decision-center`, or `$DECISION_CENTER_HOME`. The folder 
 - `flags.json`: which items you read or dismissed.
 - `failures.json`: the last 50 failed replies.
 
-The hook runs on every hook call of every session. It reads the payload, appends one line, and exits 0 with nothing on stdout, whatever happens. It makes no network calls and starts no processes. It takes about 25 ms per call, measured as the median of 35 runs on an Apple Silicon Mac. About 20 ms of that is Node starting up.
+The hook runs on every hook call of every session. It reads the payload, appends one line, and exits 0 with nothing on stdout, whatever happens. It makes no network calls and starts no processes. It takes about 25 ms per call, the median of 35 runs of `node dist/hook.mjs` on an Apple Silicon Mac, not counting the shell the agent starts it from. About 20 ms of that is Node starting up.
 
 The server runs these programs:
 
