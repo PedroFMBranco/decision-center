@@ -74,3 +74,11 @@ test('an ended or dead session with no successor is not live and not replaced', 
   assert.deepEqual(view.live.map((s) => s.id), ['claude:outside'])
   assert.deepEqual([...view.replaced], [])
 })
+
+test('a child agent that ran and ended in the same pane leaves the parent session live', () => {
+  const parent = session('parent', { updatedAt: 5 })
+  const child = session('child', { pid: 11, ended: true, updatedAt: 9 })
+  const view = viewSessions([parent, child], () => true)
+  assert.deepEqual(view.live.map((s) => s.id), ['claude:parent'])
+  assert.deepEqual([...view.replaced], [])
+})

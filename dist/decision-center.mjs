@@ -271,6 +271,7 @@ function installedEvents(text2) {
 
 // src/main.ts
 import { mkdirSync as mkdirSync2, watch } from "node:fs";
+import { realpath as realpath2 } from "node:fs/promises";
 import { join as join8 } from "node:path";
 
 // src/binding.ts
@@ -1409,7 +1410,8 @@ function turn(session, next, at) {
 }
 var working = (s, e) => e.actor ? {} : turn(s, "working", e.at);
 var RULES = {
-  SessionStart: () => ({ ended: false }),
+  // Why startedAt moves: a resumed session runs in a newer process, and liveness checks compare the two.
+  SessionStart: (_s, e) => ({ ended: false, startedAt: e.at }),
   UserPromptSubmit: (s, e) => ({
     ...turn(s, "working", e.at),
     pending: null,
@@ -1534,26 +1536,24 @@ var SessionLog = class {
     }
   }
 };
-var paneKey2 = (session) => session.pane ? `${session.pane.socket}\0${session.pane.id}` : null;
+var runKey = (session) => session.pane && session.pid !== null ? `${session.pane.socket}\0${session.pane.id}\0${session.pid}` : null;
 function viewSessions(sessions, alive) {
+  const running = sessions.filter((session) => !session.ended && alive(session));
   const newest = /* @__PURE__ */ new Map();
-  for (const session of sessions) {
-    const key = paneKey2(session);
+  for (const session of running) {
+    const key = runKey(session);
     const held = key ? newest.get(key) : void 0;
     if (key && (!held || held.updatedAt < session.updatedAt)) {
       newest.set(key, session);
     }
   }
-  const running = (session) => !!session && !session.ended && alive(session);
-  const newestIn = (session) => {
-    const key = paneKey2(session);
-    return key ? newest.get(key) : session;
+  const winner = (session) => {
+    const key = runKey(session);
+    return key ? newest.get(key) : void 0;
   };
   return {
-    live: sessions.filter((session) => running(session) && newestIn(session) === session),
-    replaced: new Set(
-      sessions.filter((session) => newestIn(session) !== session && running(newestIn(session))).map((session) => session.id)
-    )
+    live: running.filter((session) => (winner(session) ?? session) === session),
+    replaced: new Set(sessions.filter((session) => winner(session) && winner(session) !== session).map((session) => session.id))
   };
 }
 
@@ -1940,11 +1940,14 @@ function sessionSource(dir) {
     const procs = all.length ? await listProcesses().catch(() => null) : null;
     let dead = /* @__PURE__ */ new Set();
     if (procs && all.some((session) => session.agent === "codex")) {
+      const resolved = await Promise.all(
+        all.map(async (session) => session.agent === "codex" ? { ...session, cwd: await realpath2(session.cwd).catch(() => session.cwd) } : session)
+      );
       const codex = procs.filter((proc) => proc.name === "codex" && proc.tty);
       const cwds = await processCwds(codex.map((proc) => proc.pid)).catch(() => null);
       if (cwds) {
         const bound = bindCodex({
-          sessions: all,
+          sessions: resolved,
           previous: bindings,
           codex: codex.flatMap((proc) => cwds.has(proc.pid) ? [{ ...proc, cwd: cwds.get(proc.pid) }] : []),
           panes: await panes(tmuxSockets())

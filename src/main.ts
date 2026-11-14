@@ -1,4 +1,5 @@
 import { mkdirSync, watch } from 'node:fs'
+import { realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import { bindCodex, listProcesses, processCwds, type Binding, type Proc } from './binding.ts'
 import { claudePrint } from './claude.ts'
@@ -44,11 +45,15 @@ function sessionSource(dir: string) {
     const procs = all.length ? await listProcesses().catch(() => null) : null
     let dead = new Set<string>()
     if (procs && all.some((session) => session.agent === 'codex')) {
+      // Why real paths: lsof reports the resolved folder, the hook the one the agent was started in.
+      const resolved = await Promise.all(
+        all.map(async (session) => (session.agent === 'codex' ? { ...session, cwd: await realpath(session.cwd).catch(() => session.cwd) } : session))
+      )
       const codex = procs.filter((proc) => proc.name === 'codex' && proc.tty)
       const cwds = await processCwds(codex.map((proc) => proc.pid)).catch(() => null)
       if (cwds) {
         const bound = bindCodex({
-          sessions: all,
+          sessions: resolved,
           previous: bindings,
           codex: codex.flatMap((proc) => (cwds.has(proc.pid) ? [{ ...proc, cwd: cwds.get(proc.pid)! }] : [])),
           panes: await panes(tmuxSockets())

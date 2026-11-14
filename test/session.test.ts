@@ -142,9 +142,11 @@ test('a Codex approval clears on its PostToolUse despite the extra description',
   assert.equal(codex(12, '01a1da71').pane, null)
 })
 
-test('SessionStart on resume reopens an ended session and takes the new pane', () => {
+test('SessionStart on resume reopens an ended session and takes the new pane, pid and start time', () => {
   const ended = claude(3, '9f44937c')
   assert.equal(ended.ended, true)
   const resumed = reduce(ended, { ...eventOf('claude', CLAUDE[0]!, 50_000), source: 'resume', pane: { socket: '/s', id: '%7' } })
   assert.deepEqual([resumed.ended, resumed.pane?.id, resumed.turn], [false, '%7', 'done'])
+  // Liveness compares the agent process's start with this, and a resumed session runs in a newer process.
+  assert.deepEqual([resumed.startedAt, resumed.pid], [50_000, 21712])
 })

@@ -19,7 +19,7 @@ export interface Session {
   pane: PaneRef | null
   /** Claude only: the agent process. */
   pid: number | null
-  /** Epoch ms of the first event seen. */
+  /** Epoch ms of the session's latest SessionStart, else its first event seen. */
   startedAt: number
   turn: Turn
   turnSince: number
@@ -53,7 +53,8 @@ const working = (s: Session, e: HookEvent) => (e.actor ? {} : turn(s, 'working',
 type Rule = (session: Session, event: HookEvent) => Partial<Session> | null
 
 const RULES: Record<string, Rule> = {
-  SessionStart: () => ({ ended: false }),
+  // Why startedAt moves: a resumed session runs in a newer process, and liveness checks compare the two.
+  SessionStart: (_s, e) => ({ ended: false, startedAt: e.at }),
   UserPromptSubmit: (s, e) => ({
     ...turn(s, 'working', e.at),
     pending: null,

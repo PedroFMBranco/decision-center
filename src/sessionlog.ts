@@ -92,34 +92,34 @@ export class SessionLog {
   }
 }
 
-const paneKey = (session: Session) => (session.pane ? `${session.pane.socket}\0${session.pane.id}` : null)
+/** Why the pid too: `/clear` keeps the process, while a child agent started from the pane's shell does not. */
+const runKey = (session: Session) =>
+  session.pane && session.pid !== null ? `${session.pane.socket}\0${session.pane.id}\0${session.pid}` : null
 
 export interface SessionView {
-  /** Sessions still running, at most one per pane. */
+  /** Sessions still running, at most one per pane and process. */
   live: Session[]
-  /** Sessions a newer live session replaced in their pane. They leave the feed without a closed item. */
+  /** Sessions a newer running session replaced in the same pane and process. They leave the feed without a closed item. */
   replaced: Set<string>
 }
 
-/** Why the newest wins a pane: `/clear` starts a new session in the same pane, and the old one is over, not closed. */
+/** Why the newest wins: `/clear` starts a new session in the same process, and the old one is over, not closed. */
 export function viewSessions(sessions: Session[], alive: (session: Session) => boolean): SessionView {
+  const running = sessions.filter((session) => !session.ended && alive(session))
   const newest = new Map<string, Session>()
-  for (const session of sessions) {
-    const key = paneKey(session)
+  for (const session of running) {
+    const key = runKey(session)
     const held = key ? newest.get(key) : undefined
     if (key && (!held || held.updatedAt < session.updatedAt)) {
       newest.set(key, session)
     }
   }
-  const running = (session: Session | undefined) => !!session && !session.ended && alive(session)
-  const newestIn = (session: Session) => {
-    const key = paneKey(session)
-    return key ? newest.get(key) : session
+  const winner = (session: Session) => {
+    const key = runKey(session)
+    return key ? newest.get(key) : undefined
   }
   return {
-    live: sessions.filter((session) => running(session) && newestIn(session) === session),
-    replaced: new Set(
-      sessions.filter((session) => newestIn(session) !== session && running(newestIn(session))).map((session) => session.id)
-    )
+    live: running.filter((session) => (winner(session) ?? session) === session),
+    replaced: new Set(sessions.filter((session) => winner(session) && winner(session) !== session).map((session) => session.id))
   }
 }
