@@ -57,7 +57,7 @@ const server = await startServer({
     failures = []
     return ok
   },
-  health: () => ({ pid: process.pid, startedAt: Date.now(), lastHeartbeatAt: null }),
+  health: () => ({ pid: process.pid, startedAt: Date.now() }),
   log: console.log
 })
 

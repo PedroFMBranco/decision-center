@@ -6,8 +6,18 @@ var STREAM_EVENT_FEED = "feed";
 // src/cli.ts
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+
+// src/terminal.ts
+var TerminalError = class extends Error {
+  code;
+  constructor(message, code) {
+    super(message);
+    this.code = code;
+  }
+};
+
+// src/cli.ts
 function resolveOrcaBin() {
   const candidates = [
     join(dirname(process.execPath), "..", "Resources", "bin", "orca"),
@@ -17,13 +27,6 @@ function resolveOrcaBin() {
   return candidates.find((path) => existsSync(path)) ?? "orca";
 }
 var ORCA_BIN = resolveOrcaBin();
-var OrcaCliError = class extends Error {
-  code;
-  constructor(message, code) {
-    super(message);
-    this.code = code;
-  }
-};
 function orca(args, timeoutMs = 15e3) {
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
@@ -37,14 +40,14 @@ function orca(args, timeoutMs = 15e3) {
         try {
           parsed = JSON.parse(stdout);
         } catch {
-          reject(new OrcaCliError(error?.message ?? "orca CLI returned no JSON", "cli_failed"));
+          reject(new TerminalError(error?.message ?? "orca CLI returned no JSON", "cli_failed"));
           return;
         }
         if (parsed.ok) {
           resolve(parsed.result);
         } else {
           reject(
-            new OrcaCliError(
+            new TerminalError(
               parsed.error?.message ?? "orca CLI failed",
               parsed.error?.code ?? "cli_failed"
             )
@@ -85,7 +88,7 @@ async function terminalScreen(handle) {
     "--screen"
   ]);
   if (result.terminal.source !== "screen") {
-    throw new OrcaCliError(
+    throw new TerminalError(
       "Orca has no screen for this pane, so the reply can't be checked; reply in the pane",
       "screen_unavailable"
     );
@@ -98,22 +101,27 @@ async function terminalSwitch(handle) {
 async function openBrowserTab(url) {
   const focused = (await worktreePs()).find((worktree) => worktree.isActive);
   if (!focused) {
-    throw new OrcaCliError("no focused Orca worktree to open the tab in", "selector_not_found");
+    throw new TerminalError("no focused Orca worktree to open the tab in", "selector_not_found");
   }
   await orca(["tab", "create", "--worktree", `id:${focused.worktreeId}`, "--url", url]);
 }
+
+// src/claude.ts
+import { execFile as execFile2 } from "node:child_process";
+import { existsSync as existsSync2 } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { join as join2 } from "node:path";
 function resolveClaudeBin() {
   const candidates = [
-    join(homedir(), ".local", "bin", "claude"),
-    join(homedir(), ".claude", "local", "claude"),
+    join2(homedir(), ".local", "bin", "claude"),
+    join2(homedir(), ".claude", "local", "claude"),
     "/opt/homebrew/bin/claude",
     "/usr/local/bin/claude"
   ];
-  return candidates.find((path) => existsSync(path)) ?? "claude";
+  return candidates.find((path) => existsSync2(path)) ?? "claude";
 }
 function claudePrint(input, options) {
   const env = { ...process.env };
-  delete env.ELECTRON_RUN_AS_NODE;
   delete env.CLAUDECODE;
   const args = [
     "-p",
@@ -132,7 +140,7 @@ function claudePrint(input, options) {
     options.systemPrompt
   ];
   return new Promise((resolve, reject) => {
-    const child = execFile(
+    const child = execFile2(
       resolveClaudeBin(),
       args,
       // Why tmpdir: keeps a project's CLAUDE.md out of the prompt.
@@ -140,7 +148,7 @@ function claudePrint(input, options) {
       (error, stdout, stderr) => {
         if (error) {
           const detail = (stderr || stdout).trim().split("\n").pop() || error.message;
-          reject(new OrcaCliError(`claude -p failed: ${detail}`, "cli_failed"));
+          reject(new Error(`claude -p failed: ${detail}`));
           return;
         }
         resolve(stdout);
@@ -320,13 +328,11 @@ var Suggester = class {
 };
 
 // src/sources.ts
-import { open, readdir, readFile, stat } from "node:fs/promises";
+import { open, readFile, stat } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
-import { join as join2 } from "node:path";
-var LAST_STATUS_PATH = join2(homedir2(), "Library", "Application Support", "orca", "agent-hooks", "last-status.json");
-var CODEX_SESSIONS_DIR = join2(homedir2(), ".codex", "sessions");
+import { join as join3 } from "node:path";
+var LAST_STATUS_PATH = join3(homedir2(), "Library", "Application Support", "orca", "agent-hooks", "last-status.json");
 var TRANSCRIPT_TAIL_BYTES = 1024 * 1024;
-var ROLLOUT_SEARCH_DAYS = 60;
 async function readLastStatus(path = LAST_STATUS_PATH) {
   let entries = {};
   try {
@@ -410,57 +416,13 @@ async function tailLines(path, size) {
     await handle.close();
   }
 }
-async function findRollout(sessionId, root) {
-  const suffix = `-${sessionId}.jsonl`;
-  let searched = 0;
-  const desc = async (dir) => (await readdir(dir).catch(() => [])).filter((name) => /^\d+$/.test(name)).sort().reverse();
-  for (const year of await desc(root)) {
-    for (const month of await desc(join2(root, year))) {
-      for (const day of await desc(join2(root, year, month))) {
-        const dir = join2(root, year, month, day);
-        const hit = (await readdir(dir).catch(() => [])).find((name) => name.endsWith(suffix));
-        if (hit) {
-          return join2(dir, hit);
-        }
-        if (++searched >= ROLLOUT_SEARCH_DAYS) {
-          return null;
-        }
-      }
-    }
-  }
-  return null;
-}
 var CodexTranscripts = class {
-  paths = /* @__PURE__ */ new Map();
   cache = /* @__PURE__ */ new Map();
-  sessionsDir;
-  constructor(sessionsDir = CODEX_SESSIONS_DIR) {
-    this.sessionsDir = sessionsDir;
-  }
-  async pathFor(entry) {
-    const direct = entry.providerSession?.transcriptPath;
-    if (direct) {
-      return direct;
-    }
-    const id = entry.providerSession?.id;
-    if (!id) {
-      return null;
-    }
-    const known = this.paths.get(id);
-    if (known) {
-      return known;
-    }
-    const found = await findRollout(id, this.sessionsDir);
-    if (found) {
-      this.paths.set(id, found);
-    }
-    return found;
-  }
   async pendingQuestion(entry) {
     if (!entry) {
       return null;
     }
-    const path = await this.pathFor(entry);
+    const path = entry.providerSession?.transcriptPath;
     if (!path) {
       return null;
     }
@@ -789,7 +751,7 @@ var ReplySender = class {
       if (error instanceof Refusal) {
         return { ok: false, error: { code: error.code, message: error.message } };
       }
-      const code = error instanceof OrcaCliError && error.code !== "cli_failed" ? "terminal_rejected" : "cli_failed";
+      const code = error instanceof TerminalError && error.code !== "cli_failed" ? "terminal_rejected" : "cli_failed";
       return { ok: false, error: { code, message: error.message } };
     }
   }
@@ -803,16 +765,7 @@ var ReplySender = class {
       refuse("terminal_rejected", "the pane has a picker open; answer it there or wait for the feed to catch up");
     }
     checkNoDraft(screen, item);
-    const text = reply.text;
-    try {
-      await this.press(handle, { text, enter: true });
-    } catch (error) {
-      if (!(error instanceof OrcaCliError && error.code === "agent_prompt_blocked")) {
-        throw error;
-      }
-      await this.key(handle, { text });
-      await this.press(handle, { enter: true });
-    }
+    await this.press(handle, { text: reply.text, enter: true });
   }
   async claudeQuestion(handle, item, reply) {
     const screen = await this.readScreen(handle);
@@ -1397,13 +1350,11 @@ var FeedStore = class {
 };
 
 // src/main.ts
-var HEARTBEAT_MS = 6e4;
 var POLL_MS = 3e4;
 var EVENT_DEBOUNCE_MS = 300;
 var SUGGEST_MODEL = "haiku";
 function activate(orca2) {
   const startedAt = Date.now();
-  let lastHeartbeatAt = null;
   let current = null;
   let refreshing = null;
   let refreshAgain = false;
@@ -1417,14 +1368,6 @@ function activate(orca2) {
     saveFlags: async (flags) => void await orca2.host.call("storage.set", { key: FLAGS_KEY, value: flags }),
     log: orca2.log
   });
-  async function heartbeat() {
-    try {
-      await orca2.host.call("storage.get", { key: "heartbeat" });
-      lastHeartbeatAt = Date.now();
-    } catch (error) {
-      orca2.log(`heartbeat failed: ${error.message}`);
-    }
-  }
   let publishedJson = "";
   function publish(snapshot) {
     current = snapshot;
@@ -1488,7 +1431,7 @@ function activate(orca2) {
     try {
       await terminalSwitch(terminal.handle);
     } catch (error) {
-      const code = error instanceof OrcaCliError && error.code !== "cli_failed" ? "terminal_rejected" : "cli_failed";
+      const code = error instanceof TerminalError && error.code !== "cli_failed" ? "terminal_rejected" : "cli_failed";
       return { ok: false, error: { code, message: error.message } };
     }
     return change(store.read(item.id));
@@ -1524,15 +1467,13 @@ function activate(orca2) {
       await failures.clear();
       return { ok: true };
     },
-    health: () => ({ pid: process.pid, startedAt, lastHeartbeatAt }),
+    health: () => ({ pid: process.pid, startedAt }),
     log: orca2.log
   });
   server.then(
     (s) => orca2.log(`serving ${s.url}`),
     (error) => orca2.log(`server failed to start: ${error.message}`)
   );
-  void heartbeat();
-  setInterval(() => void heartbeat(), HEARTBEAT_MS);
   setInterval(() => void refresh().catch((error) => orca2.log(`refresh failed: ${error.message}`)), POLL_MS);
   orca2.events.on("agent.status.changed", () => {
     clearTimeout(debounce);

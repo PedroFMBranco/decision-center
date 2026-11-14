@@ -9,7 +9,7 @@ await build({
   bundle: true,
   platform: 'node',
   format: 'esm',
-  target: 'node24',
+  target: 'node22',
   loader: { '.html': 'text' },
   legalComments: 'none',
   logLevel: 'warning'

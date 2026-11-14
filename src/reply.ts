@@ -1,5 +1,5 @@
 import type { ActionResponse, ApiErrorCode, FeedItem, FeedOption, FeedQuestion, ReplyFailure, ReplyRequest } from './contract.ts'
-import { OrcaCliError, type TerminalScreen } from './cli.ts'
+import { TerminalError, type TerminalScreen } from './terminal.ts'
 import { parseProposals } from './proposals.ts'
 
 // Keystrokes, verified live against Claude Code 2.1.283 and Codex 0.155.1
@@ -308,7 +308,7 @@ export class ReplySender {
       if (error instanceof Refusal) {
         return { ok: false, error: { code: error.code, message: error.message } }
       }
-      const code = error instanceof OrcaCliError && error.code !== 'cli_failed' ? 'terminal_rejected' : 'cli_failed'
+      const code = error instanceof TerminalError && error.code !== 'cli_failed' ? 'terminal_rejected' : 'cli_failed'
       return { ok: false, error: { code, message: (error as Error).message } }
     }
   }
@@ -323,17 +323,7 @@ export class ReplySender {
       refuse('terminal_rejected', 'the pane has a picker open; answer it there or wait for the feed to catch up')
     }
     checkNoDraft(screen, item)
-    const text = reply.text
-    try {
-      await this.press(handle, { text, enter: true })
-    } catch (error) {
-      // Why: a stale `agentWait` blocks text+Enter in one send; split, it goes through (issue 0004).
-      if (!(error instanceof OrcaCliError && error.code === 'agent_prompt_blocked')) {
-        throw error
-      }
-      await this.key(handle, { text })
-      await this.press(handle, { enter: true })
-    }
+    await this.press(handle, { text: reply.text, enter: true })
   }
 
   private async claudeQuestion(handle: string, item: FeedItem, reply: ReplyRequest['reply']): Promise<void> {

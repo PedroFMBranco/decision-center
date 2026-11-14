@@ -8,7 +8,9 @@ import {
   type SuggestRequest,
   type SuggestResponse
 } from './contract.ts'
-import { OrcaCliError, claudePrint, openBrowserTab, terminalHandleForPane, terminalScreen, terminalSend, terminalSwitch, worktreePs } from './cli.ts'
+import { openBrowserTab, terminalHandleForPane, terminalScreen, terminalSend, terminalSwitch, worktreePs } from './cli.ts'
+import { claudePrint } from './claude.ts'
+import { TerminalError } from './terminal.ts'
 import { FAILURES_KEY, FailureLog } from './failures.ts'
 import { itemKey } from './feed.ts'
 import { PAGE } from './page.ts'
@@ -26,10 +28,6 @@ export interface OrcaWorkerApi {
   log(message: string): void
 }
 
-// Orca reaps a worker after 5 idle minutes, where idle means no command, event
-// or host call (plugin-worker-manager.ts reapIdle). A cheap host call well
-// inside that window keeps the worker, and so the server, alive.
-const HEARTBEAT_MS = 60_000
 // Catches state changes that arrive without an event (e.g. a pane closing).
 const POLL_MS = 30_000
 const EVENT_DEBOUNCE_MS = 300
@@ -37,7 +35,6 @@ const SUGGEST_MODEL = 'haiku'
 
 export default function activate(orca: OrcaWorkerApi): void {
   const startedAt = Date.now()
-  let lastHeartbeatAt: number | null = null
   let current: FeedSnapshot | null = null
   let refreshing: Promise<FeedSnapshot> | null = null
   let refreshAgain = false
@@ -51,15 +48,6 @@ export default function activate(orca: OrcaWorkerApi): void {
     saveFlags: async (flags) => void (await orca.host.call('storage.set', { key: FLAGS_KEY, value: flags })),
     log: orca.log
   })
-
-  async function heartbeat(): Promise<void> {
-    try {
-      await orca.host.call('storage.get', { key: 'heartbeat' })
-      lastHeartbeatAt = Date.now()
-    } catch (error) {
-      orca.log(`heartbeat failed: ${(error as Error).message}`)
-    }
-  }
 
   let publishedJson = ''
 
@@ -140,7 +128,7 @@ export default function activate(orca: OrcaWorkerApi): void {
     try {
       await terminalSwitch(terminal.handle)
     } catch (error) {
-      const code = error instanceof OrcaCliError && error.code !== 'cli_failed' ? 'terminal_rejected' : 'cli_failed'
+      const code = error instanceof TerminalError && error.code !== 'cli_failed' ? 'terminal_rejected' : 'cli_failed'
       return { ok: false, error: { code, message: (error as Error).message } }
     }
     return change(store.read(item.id))
@@ -180,7 +168,7 @@ export default function activate(orca: OrcaWorkerApi): void {
       await failures.clear()
       return { ok: true }
     },
-    health: () => ({ pid: process.pid, startedAt, lastHeartbeatAt }),
+    health: () => ({ pid: process.pid, startedAt }),
     log: orca.log
   })
   server.then(
@@ -188,8 +176,6 @@ export default function activate(orca: OrcaWorkerApi): void {
     (error: Error) => orca.log(`server failed to start: ${error.message}`)
   )
 
-  void heartbeat()
-  setInterval(() => void heartbeat(), HEARTBEAT_MS)
   setInterval(() => void refresh().catch((error: Error) => orca.log(`refresh failed: ${error.message}`)), POLL_MS)
 
   orca.events.on('agent.status.changed', () => {

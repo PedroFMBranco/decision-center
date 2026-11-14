@@ -32,7 +32,7 @@ before(async () => {
     clearFailures: async () => ({ ok: true }),
     suggest: async ({ id }) =>
       id === 'known' ? { ok: true, proposals: ['Ship it'] } : { ok: false, error: { code: 'not_found', message: 'no' } },
-    health: () => ({ pid: 1, startedAt: 0, lastHeartbeatAt: null }),
+    health: () => ({ pid: 1, startedAt: 0 }),
     log: () => undefined
   })
 })

@@ -176,11 +176,10 @@ export interface ApiError {
 /** Response to every POST except `/api/suggest`. */
 export type ActionResponse = { ok: true } | ApiError
 
-/** `GET /api/health`, used by the idle-survival check. */
+/** `GET /api/health`. */
 export interface HealthResponse {
   ok: true
   version: typeof API_VERSION
   pid: number
   startedAt: number
-  lastHeartbeatAt: number | null
 }

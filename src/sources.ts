@@ -1,4 +1,4 @@
-import { open, readdir, readFile, stat } from 'node:fs/promises'
+import { open, readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { FeedOption, FeedPermission, FeedQuestion } from './contract.ts'
@@ -6,11 +6,8 @@ import type { FeedOption, FeedPermission, FeedQuestion } from './contract.ts'
 // Orca's hook listener keeps the latest hook payload per pane here. It's the
 // only place question options and permission summaries live (issue 0011).
 const LAST_STATUS_PATH = join(homedir(), 'Library', 'Application Support', 'orca', 'agent-hooks', 'last-status.json')
-const CODEX_SESSIONS_DIR = join(homedir(), '.codex', 'sessions')
 // A pending question sits at the end of the rollout, so the tail is enough.
 const TRANSCRIPT_TAIL_BYTES = 1024 * 1024
-// How many day folders to search for a rollout by session id, newest first.
-const ROLLOUT_SEARCH_DAYS = 60
 
 export interface LastStatusEntry {
   paneKey: string
@@ -140,65 +137,14 @@ async function tailLines(path: string, size: number): Promise<string[]> {
   }
 }
 
-async function findRollout(sessionId: string, root: string): Promise<string | null> {
-  const suffix = `-${sessionId}.jsonl`
-  let searched = 0
-  const desc = async (dir: string): Promise<string[]> =>
-    (await readdir(dir).catch(() => [] as string[])).filter((name) => /^\d+$/.test(name)).sort().reverse()
-  for (const year of await desc(root)) {
-    for (const month of await desc(join(root, year))) {
-      for (const day of await desc(join(root, year, month))) {
-        const dir = join(root, year, month, day)
-        const hit = (await readdir(dir).catch(() => [] as string[])).find((name) => name.endsWith(suffix))
-        if (hit) {
-          return join(dir, hit)
-        }
-        if (++searched >= ROLLOUT_SEARCH_DAYS) {
-          return null
-        }
-      }
-    }
-  }
-  return null
-}
-
 /** Reads Codex transcripts, re-reading a file only when it has grown or changed. */
 export class CodexTranscripts {
-  private readonly paths = new Map<string, string>()
   private readonly cache = new Map<string, { size: number; mtimeMs: number; question: FeedQuestion | null }>()
-  private readonly sessionsDir: string
-
-  constructor(sessionsDir = CODEX_SESSIONS_DIR) {
-    this.sessionsDir = sessionsDir
-  }
-
-  private async pathFor(entry: LastStatusEntry): Promise<string | null> {
-    const direct = entry.providerSession?.transcriptPath
-    if (direct) {
-      return direct
-    }
-    // Why: `transcriptPath` is verified for Claude only; Codex rollouts are
-    // named after the session id, so find it by that.
-    const id = entry.providerSession?.id
-    if (!id) {
-      return null
-    }
-    const known = this.paths.get(id)
-    if (known) {
-      return known
-    }
-    const found = await findRollout(id, this.sessionsDir)
-    if (found) {
-      this.paths.set(id, found)
-    }
-    return found
-  }
-
   async pendingQuestion(entry: LastStatusEntry | undefined): Promise<FeedQuestion | null> {
     if (!entry) {
       return null
     }
-    const path = await this.pathFor(entry)
+    const path = entry.providerSession?.transcriptPath
     if (!path) {
       return null
     }

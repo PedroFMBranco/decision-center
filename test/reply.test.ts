@@ -1,7 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { FeedItem, FeedQuestion, ReplyFailure, ReplyRequest } from '../src/contract.ts'
-import { OrcaCliError } from '../src/cli.ts'
 import { claudeQuestionCount, describeKey, pickerRows, ReplySender } from '../src/reply.ts'
 
 // Screens captured from real panes with `orca terminal read --screen`
@@ -91,19 +90,13 @@ function item(overrides: Partial<FeedItem>): FeedItem {
 }
 
 /** A sender over a fake pane: `screens` are shown in turn, the last one sticks. */
-function harness(screens: string[][], options: { draft?: string; failFirstSend?: string; onFailure?: (failure: ReplyFailure) => void } = {}) {
+function harness(screens: string[][], options: { draft?: string; onFailure?: (failure: ReplyFailure) => void } = {}) {
   const sent: string[] = []
   let shown = 0
-  let failNext = options.failFirstSend
   const sender = new ReplySender({
     terminalFor: async (paneKey) => (paneKey === 'tab:leaf' ? { handle: 'h' } : undefined),
     screen: async () => ({ lines: screens[Math.min(shown++, screens.length - 1)]!, draft: options.draft ?? null }),
     send: async (_handle, input) => {
-      if (failNext) {
-        const code = failNext
-        failNext = undefined
-        throw new OrcaCliError('blocked', code)
-      }
       sent.push(`${JSON.stringify(input.text ?? '')}${input.enter ? '+enter' : ''}`)
     },
     sleep: async () => undefined,
@@ -157,12 +150,6 @@ test("Claude's predicted next prompt in the composer is not a draft", async () =
   assert.equal(code(await typed.sender.send(item({ lastMessage }), text('hi'))), 'terminal_rejected')
   const codex = harness([CLAUDE_IDLE], { draft: 'read NTFS dates' })
   assert.equal(code(await codex.sender.send(item({ agent: 'codex', lastMessage }), text('hi'))), 'terminal_rejected')
-})
-
-test('a blocked text+Enter is retried as two sends', async () => {
-  const { sender, sent } = harness([CLAUDE_IDLE], { failFirstSend: 'agent_prompt_blocked' })
-  assert.equal(code(await sender.send(item({}), text('hi'))), 'ok')
-  assert.deepEqual(sent, ['"hi"', '""+enter'])
 })
 
 test('a Claude option is one bare digit', async () => {

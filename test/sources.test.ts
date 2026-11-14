@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { CodexTranscripts, pendingCodexQuestion, readLastStatus } from '../src/sources.ts'
@@ -37,15 +37,14 @@ test('a user message after the question answers it', () => {
   assert.equal(pendingCodexQuestion([userMessage, noise]), null)
 })
 
-test('finds a Codex rollout by session id when the hook entry has no transcript path', async () => {
+test('reads a pending question from the transcript path, and none without one', async () => {
   const root = mkdtempSync(join(tmpdir(), 'dc-codex-'))
   try {
-    const dir = join(root, '2026', '09', '27')
-    mkdirSync(dir, { recursive: true })
-    writeFileSync(join(dir, 'rollout-2026-09-27T18-59-53-abc.jsonl'), [userMessage, askCall, ''].join('\n'))
-    const question = await new CodexTranscripts(root).pendingQuestion({ paneKey: 'p', providerSession: { id: 'abc' } })
-    assert.equal(question?.title, 'Which color?')
-    assert.equal(await new CodexTranscripts(root).pendingQuestion({ paneKey: 'p', providerSession: { id: 'nope' } }), null)
+    const path = join(root, 'rollout-abc.jsonl')
+    writeFileSync(path, [userMessage, askCall, ''].join('\n'))
+    const transcripts = new CodexTranscripts()
+    assert.equal((await transcripts.pendingQuestion({ paneKey: 'p', providerSession: { transcriptPath: path } }))?.title, 'Which color?')
+    assert.equal(await transcripts.pendingQuestion({ paneKey: 'p', providerSession: { id: 'abc' } }), null)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

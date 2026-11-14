@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { TerminalError, type TerminalScreen } from './terminal.ts'
 
 // The worker runs as Orca's own Electron binary (ELECTRON_RUN_AS_NODE), so
 // the bundled CLI sits next to it. Orca started from the Dock has a bare
@@ -17,14 +17,6 @@ function resolveOrcaBin(): string {
 
 const ORCA_BIN = resolveOrcaBin()
 
-export class OrcaCliError extends Error {
-  readonly code: string
-
-  constructor(message: string, code: string) {
-    super(message)
-    this.code = code
-  }
-}
 
 /** Runs `orca <args> --json` and returns its `result`. */
 export function orca<T>(args: string[], timeoutMs = 15_000): Promise<T> {
@@ -41,14 +33,14 @@ export function orca<T>(args: string[], timeoutMs = 15_000): Promise<T> {
         try {
           parsed = JSON.parse(stdout)
         } catch {
-          reject(new OrcaCliError(error?.message ?? 'orca CLI returned no JSON', 'cli_failed'))
+          reject(new TerminalError(error?.message ?? 'orca CLI returned no JSON', 'cli_failed'))
           return
         }
         if (parsed.ok) {
           resolve(parsed.result as T)
         } else {
           reject(
-            new OrcaCliError(
+            new TerminalError(
               parsed.error?.message ?? 'orca CLI failed',
               parsed.error?.code ?? 'cli_failed'
             )
@@ -117,13 +109,6 @@ export async function terminalSend(handle: string, input: { text?: string; enter
   await orca(args)
 }
 
-export interface TerminalScreen {
-  /** The rendered frame, top to bottom. */
-  lines: string[]
-  /** Text typed into the agent's composer but not sent, if any. */
-  draft: string | null
-}
-
 /**
  * Reads what the terminal renders. Why: the default stream read of a
  * repainting TUI is garbled and can miss the picker entirely (issue 0004).
@@ -139,7 +124,7 @@ export async function terminalScreen(handle: string): Promise<TerminalScreen> {
   if (result.terminal.source !== 'screen') {
     // Why: some live panes keep no screen in Orca, so every retry fails the
     // same way (issue 0028).
-    throw new OrcaCliError(
+    throw new TerminalError(
       "Orca has no screen for this pane, so the reply can't be checked; reply in the pane",
       'screen_unavailable'
     )
@@ -158,58 +143,7 @@ export async function openBrowserTab(url: string): Promise<void> {
   // worker's cwd isn't in one. `worktree ps` flags the focused worktree.
   const focused = (await worktreePs()).find((worktree) => worktree.isActive)
   if (!focused) {
-    throw new OrcaCliError('no focused Orca worktree to open the tab in', 'selector_not_found')
+    throw new TerminalError('no focused Orca worktree to open the tab in', 'selector_not_found')
   }
   await orca(['tab', 'create', '--worktree', `id:${focused.worktreeId}`, '--url', url])
-}
-
-// Same bare-PATH problem as the Orca CLI: look where the installers put it.
-function resolveClaudeBin(): string {
-  const candidates = [
-    join(homedir(), '.local', 'bin', 'claude'),
-    join(homedir(), '.claude', 'local', 'claude'),
-    '/opt/homebrew/bin/claude',
-    '/usr/local/bin/claude'
-  ]
-  return candidates.find((path) => existsSync(path)) ?? 'claude'
-}
-
-/**
- * Runs `claude -p` with `input` on stdin and returns its answer. Why the
- * flags: no settings (so no hooks, which would log a fake session), no MCP
- * servers, no tools and no saved session. Auth still comes from your login.
- */
-export function claudePrint(input: string, options: { model: string; systemPrompt: string; timeoutMs?: number }): Promise<string> {
-  const env = { ...process.env }
-  delete env.ELECTRON_RUN_AS_NODE
-  // Why: set when Orca itself runs under Claude Code; claude refuses to nest.
-  delete env.CLAUDECODE
-  const args = [
-    '-p',
-    '--model', options.model,
-    '--effort', 'low',
-    '--setting-sources', '',
-    '--strict-mcp-config',
-    '--tools', '',
-    '--no-session-persistence',
-    '--disable-slash-commands',
-    '--system-prompt', options.systemPrompt
-  ]
-  return new Promise((resolve, reject) => {
-    const child = execFile(
-      resolveClaudeBin(),
-      args,
-      // Why tmpdir: keeps a project's CLAUDE.md out of the prompt.
-      { env, cwd: tmpdir(), timeout: options.timeoutMs ?? 60_000, maxBuffer: 4 * 1024 * 1024 },
-      (error, stdout, stderr) => {
-        if (error) {
-          const detail = (stderr || stdout).trim().split('\n').pop() || error.message
-          reject(new OrcaCliError(`claude -p failed: ${detail}`, 'cli_failed'))
-          return
-        }
-        resolve(stdout)
-      }
-    )
-    child.stdin?.end(input)
-  })
 }
