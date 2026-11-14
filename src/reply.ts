@@ -86,7 +86,8 @@ export function claudeQuestionCount(lines: string[]): number {
 /** The question heading under the tab header of Claude's picker. */
 export function claudePickerHeading(lines: string[]): string {
   const header = lastIndex(lines, (line) => /[☐☒]/.test(line))
-  return header < 0 ? '' : (lines[header + 1] ?? '').trim()
+  // Why not the next line: tmux keeps the blank line the picker draws under its header.
+  return header < 0 ? '' : (lines.slice(header + 1).find((line) => line.trim()) ?? '').trim()
 }
 
 /** Where Claude's permission prompt is on screen (`Esc to cancel · Tab to amend`), or -1. */

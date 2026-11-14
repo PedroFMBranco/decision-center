@@ -707,7 +707,7 @@ function claudeQuestionCount(lines) {
 }
 function claudePickerHeading(lines) {
   const header = lastIndex(lines, (line) => /[☐☒]/.test(line));
-  return header < 0 ? "" : (lines[header + 1] ?? "").trim();
+  return header < 0 ? "" : (lines.slice(header + 1).find((line) => line.trim()) ?? "").trim();
 }
 function claudePermissionFooter(lines) {
   const footer = lastIndex(lines, (line) => line.trim().startsWith("Esc to cancel"));

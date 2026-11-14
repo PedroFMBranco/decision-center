@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { FeedItem, FeedQuestion, ReplyFailure, ReplyRequest } from '../src/contract.ts'
-import { claudeQuestionCount, describeKey, pickerRows, ReplySender } from '../src/reply.ts'
+import { claudePickerHeading, claudeQuestionCount, describeKey, pickerRows, ReplySender } from '../src/reply.ts'
 
 // Screens captured from real panes (Claude Code 2.1.283, Codex 0.155.1). The
 // plain lines match what `tmux capture-pane -p` gives today (issue 0029, fact 23).
@@ -124,6 +124,13 @@ test('counts the questions in a Claude picker from its tab header', () => {
   assert.equal(claudeQuestionCount(CLAUDE_SINGLE), 1)
   assert.equal(claudeQuestionCount(CLAUDE_MULTI), 1)
   assert.equal(claudeQuestionCount(['←  ☐ Color  ☐ Size  ✔ Submit  →', ...CLAUDE_SINGLE.slice(3)]), 2)
+})
+
+test('reads the picker heading past the blank line tmux keeps under the tab header', () => {
+  const captured = ['←  ☐ Colour  ☐ Seasons  ✔ Submit  →', '', 'Which colour?', '', '❯ 1. Red', '     Pick red', '  2. Blue']
+  assert.equal(claudePickerHeading(captured), 'Which colour?')
+  assert.equal(claudePickerHeading(['←  ☐ Colour  ☐ Seasons  ✔ Submit  →', 'Which colour?']), 'Which colour?')
+  assert.equal(claudePickerHeading(['no picker here']), '')
 })
 
 test('a finished turn gets free text as one text+Enter send', async () => {
