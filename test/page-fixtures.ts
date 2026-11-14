@@ -8,8 +8,9 @@ function item(overrides: Partial<FeedItem> & Pick<FeedItem, 'id' | 'kind'>, now:
   return {
     agent: 'claude',
     state: overrides.kind === 'finished' ? 'done' : overrides.kind === 'closed' ? 'closed' : 'waiting',
-    worktreeId: `repo::/code/${overrides.worktreeName ?? 'app'}`,
-    worktreeName: 'app',
+    project: 'app',
+    cwd: `/code/${overrides.project ?? 'app'}`,
+    terminal: overrides.kind === 'closed' ? null : { kind: 'tmux', pane: '%1' },
     title: 'Untitled session',
     prompt: null,
     lastMessage: null,
@@ -37,7 +38,7 @@ function longMessage(): string {
 export function fixtureItems(now = Date.now()): FeedItem[] {
   return [
     item({
-      id: 'q-single', kind: 'question', worktreeName: 'v3-app', title: 'T7 planning', unread: true, since: now - 2 * MIN,
+      id: 'q-single', kind: 'question', project: 'v3-app', title: 'T7 planning', unread: true, since: now - 2 * MIN,
       lastMessage: '**M3 T6 (Cursor capture) is merged into `m3` at `d3ee4bd`.** CI passes.\n\nT7 needs a base branch before I start.',
       question: {
         title: 'Which branch should T7 build on?', multiSelect: false,
@@ -49,7 +50,7 @@ export function fixtureItems(now = Date.now()): FeedItem[] {
       }
     }, now),
     item({
-      id: 'q-codex', kind: 'question', agent: 'codex', state: 'done', worktreeName: 'billing-api', title: 'gates', unread: true, since: now - 5 * MIN,
+      id: 'q-codex', kind: 'question', agent: 'codex', state: 'done', project: 'billing-api', title: 'gates', unread: true, since: now - 5 * MIN,
       lastMessage: 'The four follow-ups are on `m2-tf-followups`. Before I mark it ready, pick the gates to run.',
       question: {
         title: 'Which gate should run before I mark it ready?', multiSelect: false,
@@ -60,7 +61,7 @@ export function fixtureItems(now = Date.now()): FeedItem[] {
       }
     }, now),
     item({
-      id: 'q-multi', kind: 'question', worktreeName: 'infra', title: 'release gates', since: now - 7 * MIN,
+      id: 'q-multi', kind: 'question', project: 'infra', title: 'release gates', since: now - 7 * MIN,
       lastMessage: 'Pick the checks to run before the release.',
       question: {
         title: 'Which checks should run?', multiSelect: true,
@@ -72,7 +73,7 @@ export function fixtureItems(now = Date.now()): FeedItem[] {
       }
     }, now),
     item({
-      id: 'q-parts', kind: 'question', worktreeName: 'v2-fe', title: 'rollout', since: now - 8 * MIN,
+      id: 'q-parts', kind: 'question', project: 'v2-fe', title: 'rollout', since: now - 8 * MIN,
       lastMessage: 'Two decisions before the rollout.',
       question: {
         title: 'Which tenant goes first?', header: 'Tenant', multiSelect: false,
@@ -84,32 +85,36 @@ export function fixtureItems(now = Date.now()): FeedItem[] {
       }
     }, now),
     item({
-      id: 'q-text', kind: 'question', agent: 'codex', state: 'done', worktreeName: 'legacy', title: 'naming', since: now - 9 * MIN,
+      id: 'q-text', kind: 'question', agent: 'codex', state: 'done', project: 'legacy', title: 'naming', since: now - 9 * MIN,
       lastMessage: 'What should the new job be called?',
       question: { title: 'What should the new job be called?', multiSelect: false, options: [] }
     }, now),
     item({
-      id: 'perm', kind: 'permission', worktreeName: 'infra', title: 'cleanup', unread: true, since: now - 4 * MIN,
+      id: 'perm', kind: 'permission', project: 'infra', title: 'cleanup', unread: true, since: now - 4 * MIN,
       lastMessage: 'The test stack is stopped. Removing its data volume frees about 23 GB.',
       permission: { toolName: 'Bash', summary: 'docker volume rm floci_data floci_pg' }
     }, now),
     item({
-      id: 'done-props', kind: 'finished', worktreeName: 'legacy', title: 'W7 GDAL lambda', unread: true, since: now - 6 * MIN,
+      id: 'done-props', kind: 'finished', project: 'legacy', title: 'W7 GDAL lambda', unread: true, since: now - 6 * MIN,
       lastMessage: 'Legacy now converts files only through the GDAL Lambda.\n\n**What changed**\n- No local `ogr2ogr` left in the upload path.\n- `ConvertJob` retries twice.\n\nNext: run the same comparison on the staging bucket, or open the PR for review.',
       proposals: ['Run the same comparison on the staging bucket', 'Open the PR for review']
     }, now),
     item({
-      id: 'done-suggest', kind: 'finished', agent: 'codex', worktreeName: 'billing-api', title: 'T0 contracts', since: now - 41 * MIN,
+      id: 'done-suggest', kind: 'finished', agent: 'codex', project: 'billing-api', title: 'T0 contracts', since: now - 41 * MIN,
       lastMessage: 'T0 is finished on branch `m2-t0-contracts`, and `scripts/ci.sh` passes with every gate.',
       canSuggest: true
     }, now),
     item({
-      id: 'done-reject', kind: 'finished', worktreeName: 'ops', title: 'half-typed composer', since: now - 50 * MIN,
+      id: 'done-reject', kind: 'finished', project: 'ops', title: 'half-typed composer', since: now - 50 * MIN,
       lastMessage: 'Done. Replies to this item fail in the preview, to show the error state.'
     }, now),
-    item({ id: 'done-long', kind: 'finished', worktreeName: 'v3-app', title: 'I-0018 warm gate', since: now - 130 * MIN, lastMessage: longMessage() }, now),
     item({
-      id: 'closed', kind: 'closed', worktreeName: 'ops', title: 'disk cleanup', since: now - 95 * MIN,
+      id: 'done-outside', kind: 'finished', agent: 'codex', project: 'notes', title: 'outside tmux', since: now - 70 * MIN, terminal: null,
+      lastMessage: 'This session runs in a terminal outside tmux, so the page shows it but cannot reply.'
+    }, now),
+    item({ id: 'done-long', kind: 'finished', project: 'v3-app', title: 'I-0018 warm gate', since: now - 130 * MIN, lastMessage: longMessage() }, now),
+    item({
+      id: 'closed', kind: 'closed', project: 'ops', title: 'disk cleanup', since: now - 95 * MIN,
       lastMessage: 'The local test stack is gone and about 23 GB is freed.\n\n| Removed | Freed |\n|---|---|\n| floci volumes | 19.8 GB |\n| dangling images | 2.1 GB |'
     }, now)
   ]

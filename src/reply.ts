@@ -1,6 +1,6 @@
 import type { ActionResponse, ApiErrorCode, FeedItem, FeedOption, FeedQuestion, ReplyFailure, ReplyRequest } from './contract.ts'
+import type { PaneRef } from './events.ts'
 import { TerminalError, type TerminalScreen } from './terminal.ts'
-import { parseProposals } from './proposals.ts'
 
 // Keystrokes, verified live against Claude Code 2.1.283 and Codex 0.155.1
 // (issues 0004, 0012, 0015, 0021, 0022).
@@ -12,20 +12,22 @@ const TAB = '\t'
 const OPTION_UP = '\x1b[1;3A'
 /** Option+Down: back from Codex's picker to its main prompt. */
 const OPTION_DOWN = '\x1b[1;3B'
-// Why: each key is its own `terminal send`, and the TUI needs a moment to
+// Why: each key is its own send, and the TUI needs a moment to
 // repaint before the next one lands on the right row.
 const KEY_GAP_MS = 250
 const SCREEN_WAIT_MS = 3000
 
 export interface SenderDeps {
-  terminalFor(paneKey: string): Promise<{ handle: string } | undefined>
-  screen(handle: string): Promise<TerminalScreen>
-  send(handle: string, input: { text?: string; enter?: boolean }): Promise<void>
+  terminalFor(id: string): Promise<{ handle: PaneRef } | undefined>
+  screen(handle: PaneRef): Promise<TerminalScreen>
+  send(handle: PaneRef, input: { text?: string; enter?: boolean }): Promise<void>
   sleep?(ms: number): Promise<void>
   /** Called once for every reply that fails, with what the sender saw and typed. */
   onFailure?(failure: ReplyFailure): void
   now?(): number
 }
+
+export const NOT_IN_TMUX = 'this session is not running in tmux; reply in its terminal'
 
 /** How many screen lines a failure keeps: enough to see the prompt, not the scrollback. */
 const FAILURE_SCREEN_LINES = 40
@@ -189,15 +191,10 @@ function checkOptions(rows: ScreenRow[], indexes: number[], options: FeedOption[
 
 /**
  * Refuses when you've half-typed something in the pane, so a reply never merges with it.
- * Why a draft that is one of the agent's own proposed replies passes: Claude Code
- * shows its predicted next prompt in the empty composer, and Orca reports it as a
- * draft.
+ * The screen reader leaves out styled composer text, such as Claude's predicted next prompt.
  */
-function checkNoDraft(screen: TerminalScreen, item: FeedItem): void {
+function checkNoDraft(screen: TerminalScreen): void {
   const draft = screen.draft?.trim()
-  if (draft && item.agent === 'claude' && parseProposals(item.lastMessage).includes(draft)) {
-    return
-  }
   if (draft) {
     refuse('terminal_rejected', `the pane has unsent text in its composer: "${draft.slice(0, 60)}"`)
   }
@@ -213,14 +210,14 @@ export class ReplySender {
     this.deps = deps
   }
 
-  private async readScreen(handle: string): Promise<TerminalScreen> {
+  private async readScreen(handle: PaneRef): Promise<TerminalScreen> {
     const screen = await this.deps.screen(handle)
     this.trace.screen = screen.lines
     this.trace.draft = screen.draft ?? null
     return screen
   }
 
-  private async press(handle: string, input: { text?: string; enter?: boolean }): Promise<void> {
+  private async press(handle: PaneRef, input: { text?: string; enter?: boolean }): Promise<void> {
     await this.deps.send(handle, input)
     this.trace.keys.push(describeKey(input))
   }
@@ -229,13 +226,13 @@ export class ReplySender {
     return this.deps.sleep ? this.deps.sleep(ms) : new Promise((done) => setTimeout(done, ms))
   }
 
-  private async key(handle: string, input: { text?: string; enter?: boolean }): Promise<void> {
+  private async key(handle: PaneRef, input: { text?: string; enter?: boolean }): Promise<void> {
     await this.press(handle, input)
     await this.sleep(KEY_GAP_MS)
   }
 
   /** Re-reads the screen until `ready` holds, for keys whose effect takes a repaint. */
-  private async screenUntil(handle: string, ready: (lines: string[]) => boolean): Promise<TerminalScreen | null> {
+  private async screenUntil(handle: PaneRef, ready: (lines: string[]) => boolean): Promise<TerminalScreen | null> {
     for (let waited = 0; waited <= SCREEN_WAIT_MS; waited += KEY_GAP_MS) {
       const screen = await this.readScreen(handle)
       if (ready(screen.lines)) {
@@ -263,7 +260,7 @@ export class ReplySender {
       itemId: request.id,
       agent: item?.agent ?? null,
       kind: item?.kind ?? null,
-      where: item ? `${item.worktreeName} / ${item.title}` : null,
+      where: item ? `${item.project} / ${item.title}` : null,
       reply: request.reply,
       code: error.code,
       message: error.message,
@@ -286,6 +283,9 @@ export class ReplySender {
       }
       if (item.kind !== 'permission' && request.reply.type === 'permission') {
         refuse('bad_request', 'this item is not a permission ask')
+      }
+      if (!item.terminal) {
+        refuse('session_closed', NOT_IN_TMUX)
       }
       const terminal = await this.deps.terminalFor(item.id)
       if (!terminal) {
@@ -314,7 +314,7 @@ export class ReplySender {
   }
 
   /** A normal message into the composer. Both agents queue it if a turn is running (issue 0004). */
-  private async message(handle: string, item: FeedItem, reply: ReplyRequest['reply']): Promise<void> {
+  private async message(handle: PaneRef, item: FeedItem, reply: ReplyRequest['reply']): Promise<void> {
     if (reply.type !== 'text') {
       refuse('bad_request', 'this item has no options to pick; reply with text')
     }
@@ -322,15 +322,15 @@ export class ReplySender {
     if (claudePickerFooter(screen.lines) >= 0 || codexPickerFooter(screen.lines) >= 0) {
       refuse('terminal_rejected', 'the pane has a picker open; answer it there or wait for the feed to catch up')
     }
-    checkNoDraft(screen, item)
+    checkNoDraft(screen)
     await this.press(handle, { text: reply.text, enter: true })
   }
 
-  private async claudeQuestion(handle: string, item: FeedItem, reply: ReplyRequest['reply']): Promise<void> {
+  private async claudeQuestion(handle: PaneRef, item: FeedItem, reply: ReplyRequest['reply']): Promise<void> {
     const screen = await this.readScreen(handle)
     const footer = claudePickerFooter(screen.lines)
     if (footer < 0) {
-      // Why: Orca can keep a pane `waiting` after the picker is cancelled.
+      // Why: a cancelled picker fires no hook, so the item can outlive it.
       // Text still makes sense as a message; a digit would land as a typo.
       if (reply.type === 'text') {
         await this.message(handle, item, reply)
@@ -401,7 +401,7 @@ export class ReplySender {
    * single-select part (it moves on by itself), toggles then Right for a
    * multi-select one. Then 1 submits the review screen.
    */
-  private async claudeParts(handle: string, parts: FeedQuestion[], answers: number[][]): Promise<void> {
+  private async claudeParts(handle: PaneRef, parts: FeedQuestion[], answers: number[][]): Promise<void> {
     if (answers.length !== parts.length) {
       refuse('bad_request', `pick an answer for each of the ${parts.length} questions`)
     }
@@ -440,7 +440,7 @@ export class ReplySender {
    * Claude: the row's digit decides. With a note: Down to the row, Tab to
    * amend it, the note, Enter. Rows: 1. Yes, 2. Yes and always allow…, 3. No.
    */
-  private async claudePermission(handle: string, item: FeedItem, reply: PermissionReply): Promise<void> {
+  private async claudePermission(handle: PaneRef, item: FeedItem, reply: PermissionReply): Promise<void> {
     const screen = await this.readScreen(handle)
     const footer = claudePermissionFooter(screen.lines)
     if (footer < 0) {
@@ -475,7 +475,7 @@ export class ReplySender {
   }
 
   /** Codex: the row's digit decides. A note follows as a normal message once the prompt closes. */
-  private async codexPermission(handle: string, item: FeedItem, reply: PermissionReply): Promise<void> {
+  private async codexPermission(handle: PaneRef, item: FeedItem, reply: PermissionReply): Promise<void> {
     const screen = await this.readScreen(handle)
     const footer = codexPermissionFooter(screen.lines)
     if (footer < 0) {
@@ -498,7 +498,7 @@ export class ReplySender {
     await this.message(handle, item, { type: 'text', text: note })
   }
 
-  private async codexQuestion(handle: string, item: FeedItem, reply: ReplyRequest['reply']): Promise<void> {
+  private async codexQuestion(handle: PaneRef, item: FeedItem, reply: ReplyRequest['reply']): Promise<void> {
     if (reply.type === 'answers' || reply.type === 'permission') {
       refuse('bad_request', 'Codex questions take one option or free text')
     }

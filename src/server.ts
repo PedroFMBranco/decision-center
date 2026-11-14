@@ -248,15 +248,7 @@ export function startServer(deps: ServerDeps): Promise<DecisionCenterServer> {
   }, STREAM_PING_MS)
 
   return new Promise((resolve, reject) => {
-    let attempts = 0
-    // Why: a reaped worker gets 2 s to exit, so the next generation can find
-    // the port still held for a moment.
-    server.on('error', (error: NodeJS.ErrnoException) => {
-      if (error.code === 'EADDRINUSE' && attempts < 20) {
-        attempts += 1
-        setTimeout(() => server.listen(deps.port, '127.0.0.1'), 250)
-        return
-      }
+    server.on('error', (error) => {
       clearInterval(pingTimer)
       reject(error)
     })

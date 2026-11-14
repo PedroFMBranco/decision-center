@@ -1,130 +1,69 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { itemFromAgent, snapshotOf, type PaneContext } from '../src/feed.ts'
-import type { PsAgent } from '../src/cli.ts'
-import { agent, worktree } from './fixtures.ts'
+import { itemFromSession, snapshotOf, type SessionContext } from '../src/feed.ts'
 import type { FeedItem } from '../src/contract.ts'
+import type { Session } from '../src/session.ts'
+import { permissionAsk, questionAsk, session } from './fixtures.ts'
 
-function items(agents: PsAgent[], contexts: Record<string, PaneContext> = {}): FeedItem[] {
-  const wt = worktree(agents)
-  return snapshotOf(agents.flatMap((a) => itemFromAgent(wt, a, contexts[a.paneKey]) ?? [])).items
-}
+const item = (s: Session, context: Partial<SessionContext> = {}) => itemFromSession(s, { pending: s.pending, ...context })
+const items = (sessions: Session[]): FeedItem[] => snapshotOf(sessions.flatMap((s) => item(s) ?? [])).items
 
-const askPrompt = JSON.stringify({
-  questions: [
-    {
-      question: 'Which color?',
-      header: 'Color',
-      multiSelect: false,
-      options: [{ label: 'Red', description: 'warm' }, { label: 'Blue' }]
-    }
-  ]
-})
+const colour = { title: 'Which colour?', header: 'Colour', multiSelect: false, options: [{ index: 1, label: 'Red' }] }
 
-test('keeps waiting, blocked and done top-level Claude/Codex panes only', () => {
+test('a finished turn, a permission ask and a question are items; a working or idle session is not', () => {
   const kinds = items([
-    agent({ paneKey: 'a', state: 'waiting' }),
-    agent({ paneKey: 'b', state: 'blocked', agentType: 'codex' }),
-    agent({ paneKey: 'c', state: 'done' }),
-    agent({ paneKey: 'd', state: 'working' }),
-    agent({ paneKey: 'e', state: 'done', agentType: 'opencode' }),
-    agent({ paneKey: 'f', state: 'done', parentPaneKey: 'coordinator' })
-  ]).map((item) => [item.id, item.kind])
+    session({ id: 'claude:a', pending: permissionAsk('rm -rf build', 3000) }),
+    session({ id: 'claude:b', pending: questionAsk(colour, 2000), turn: 'working' }),
+    session({ id: 'claude:c' }),
+    session({ id: 'claude:d', turn: 'working' }),
+    session({ id: 'claude:e', turn: 'idle' })
+  ]).map((i) => [i.id, i.kind, i.state])
   assert.deepEqual(kinds, [
-    ['a', 'permission'],
-    ['b', 'permission'],
-    ['c', 'finished']
+    ['claude:a', 'permission', 'waiting'],
+    ['claude:b', 'question', 'waiting'],
+    ['claude:c', 'finished', 'done']
   ])
 })
 
-test('a waiting pane with question options in the hook file is a question', () => {
-  const [item] = items([agent({ state: 'waiting' })], {
-    'tab:leaf': { entry: { paneKey: 'tab:leaf', payload: { state: 'waiting', interactivePrompt: askPrompt } } }
-  })
-  assert.equal(item?.kind, 'question')
-  assert.deepEqual(item?.question, {
-    title: 'Which color?',
-    header: 'Color',
-    multiSelect: false,
-    options: [
-      { index: 1, label: 'Red', description: 'warm' },
-      { index: 2, label: 'Blue' }
-    ]
-  })
+test('an ask dates from when it was asked, a finished turn from when the turn ended', () => {
+  assert.equal(item(session({ pending: permissionAsk('ls', 4321) }))?.since, 4321)
+  assert.equal(item(session({ turnSince: 1234 }))?.since, 1234)
+  assert.deepEqual(item(session({ pending: permissionAsk('ls', 1) }))?.permission, { toolName: 'Bash', summary: 'ls' })
 })
 
-test('a picker with several questions keeps the rest of them in order under `more`', () => {
-  const twoParts = JSON.stringify({
-    questions: [
-      { question: 'Which toppings?', header: 'Toppings', multiSelect: true, options: [{ label: 'Cheese' }, { label: 'Olive' }] },
-      { question: 'Which size?', header: 'Size', multiSelect: false, options: [{ label: 'Small' }] }
-    ]
-  })
-  const [item] = items([agent({ state: 'waiting' })], {
-    'tab:leaf': { entry: { paneKey: 'tab:leaf', payload: { state: 'waiting', interactivePrompt: twoParts } } }
-  })
-  assert.equal(item?.question?.title, 'Which toppings?')
-  assert.equal(item?.question?.multiSelect, true)
-  assert.deepEqual(item?.question?.more, [
-    { title: 'Which size?', header: 'Size', multiSelect: false, options: [{ index: 1, label: 'Small' }] }
-  ])
+test('a Codex session done with its turn and a pending transcript question is a question', () => {
+  const codex = session({ id: 'codex:x', agent: 'codex', pane: null })
+  const asked = item(codex, { codexQuestion: colour })
+  assert.deepEqual([asked?.kind, asked?.state, asked?.question], ['question', 'done', colour])
 })
 
-test('a waiting pane with an approval in the hook file is a permission ask', () => {
-  const approval = JSON.stringify({ approval: { tool: 'Bash', summary: 'runs `rm -rf build`' } })
-  const [item] = items([agent({ state: 'waiting' })], {
-    'tab:leaf': { entry: { paneKey: 'tab:leaf', payload: { state: 'waiting', interactivePrompt: approval } } }
-  })
-  assert.equal(item?.kind, 'permission')
-  assert.deepEqual(item?.permission, { toolName: 'Bash', summary: 'runs `rm -rf build`' })
+test('project is the last folder of cwd; terminal names the tmux pane, or null outside tmux', () => {
+  const inside = item(session({ cwd: '/code/billing-api/' }))
+  assert.deepEqual([inside?.project, inside?.cwd, inside?.terminal], ['billing-api', '/code/billing-api/', { kind: 'tmux', pane: '%1' }])
+  assert.equal(item(session({ pane: null }))?.terminal, null)
 })
 
-test('a stale hook entry for another state is ignored', () => {
-  const [item] = items([agent({ state: 'waiting', toolName: 'Bash', toolInput: 'ls' })], {
-    'tab:leaf': { entry: { paneKey: 'tab:leaf', payload: { state: 'done', interactivePrompt: askPrompt } } }
-  })
-  assert.deepEqual([item?.kind, item?.permission], ['permission', { toolName: 'Bash', summary: 'ls' }])
-})
-
-test('a waiting AskUserQuestion without options is a title-only question', () => {
-  const [item] = items([agent({ state: 'waiting', toolName: 'AskUserQuestion', lastAssistantMessage: 'Which one?' })])
-  assert.deepEqual(item?.question, { title: 'Which one?', multiSelect: false, options: [] })
-})
-
-test('a done Codex pane with a pending transcript question is a question', () => {
-  const question = { title: 'Pick', multiSelect: false, options: [{ index: 1, label: 'A' }] }
-  const [item] = items([agent({ agentType: 'codex' })], { 'tab:leaf': { codexQuestion: question } })
-  assert.deepEqual([item?.kind, item?.state, item?.question], ['question', 'done', question])
+test('title is the first line of the last prompt', () => {
+  assert.equal(item(session())?.title, 'fix the login bug')
+  assert.equal(item(session({ prompt: null }))?.title, 'Untitled session')
 })
 
 test('waiting items sort before finished ones, newest first within a group', () => {
   const ids = items([
-    agent({ paneKey: 'old-done', stateStartedAt: 1 }),
-    agent({ paneKey: 'new-done', stateStartedAt: 3 }),
-    agent({ paneKey: 'question', state: 'waiting', stateStartedAt: 2 })
-  ]).map((item) => item.id)
-  assert.deepEqual(ids, ['question', 'new-done', 'old-done'])
-})
-
-test('title falls back from task title to display name to the first prompt line', () => {
-  const [a, b, c] = items([
-    agent({ paneKey: 'a', taskTitle: 'Task', stateStartedAt: 3 }),
-    agent({ paneKey: 'b', displayName: 'Pane', stateStartedAt: 2 }),
-    agent({ paneKey: 'c', stateStartedAt: 1 })
-  ])
-  assert.equal(a?.title, 'Task')
-  assert.equal(b?.title, 'Pane')
-  assert.equal(c?.title, 'fix the login bug')
-  assert.equal(c?.worktreeName, 'app')
+    session({ id: 'claude:old-done', turnSince: 1 }),
+    session({ id: 'claude:new-done', turnSince: 3 }),
+    session({ id: 'claude:question', pending: questionAsk(colour, 2) })
+  ]).map((i) => i.id)
+  assert.deepEqual(ids, ['claude:question', 'claude:new-done', 'claude:old-done'])
 })
 
 test('finished turns get parsed proposals, or can ask for suggestions', () => {
-  const [parsed, none, empty, question] = items([
-    agent({ paneKey: 'a', lastAssistantMessage: 'Done.\nNext: open the PR', stateStartedAt: 4 }),
-    agent({ paneKey: 'b', lastAssistantMessage: 'Done.', stateStartedAt: 3 }),
-    agent({ paneKey: 'c', lastAssistantMessage: '', stateStartedAt: 2 }),
-    agent({ paneKey: 'd', state: 'waiting', toolName: 'AskUserQuestion', lastAssistantMessage: 'Next: pick one' })
-  ]).sort((x, y) => x.id.localeCompare(y.id))
+  const [parsed, none, empty, question] = [
+    item(session({ lastMessage: 'Done.\nNext: open the PR' })),
+    item(session({ lastMessage: 'Done.' })),
+    item(session({ lastMessage: '' })),
+    item(session({ lastMessage: 'Next: pick one', pending: questionAsk(colour, 5) }))
+  ]
   assert.deepEqual([parsed?.proposals, parsed?.canSuggest], [['open the PR'], false])
   assert.deepEqual([none?.proposals, none?.canSuggest], [[], true])
   assert.deepEqual([empty?.proposals, empty?.canSuggest], [[], false])

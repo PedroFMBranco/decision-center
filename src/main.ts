@@ -1,63 +1,114 @@
-import {
-  DEFAULT_PORT,
-  type ActionResponse,
-  type ApiError,
-  type FeedSnapshot,
-  type OpenRequest,
-  type ReplyRequest,
-  type SuggestRequest,
-  type SuggestResponse
-} from './contract.ts'
-import { openBrowserTab, terminalHandleForPane, terminalScreen, terminalSend, terminalSwitch, worktreePs } from './cli.ts'
+import { mkdirSync, watch } from 'node:fs'
+import { join } from 'node:path'
+import { bindCodex, listProcesses, processCwds, type Binding, type Proc } from './binding.ts'
 import { claudePrint } from './claude.ts'
-import { TerminalError } from './terminal.ts'
-import { FAILURES_KEY, FailureLog } from './failures.ts'
+import type { ActionResponse, ApiError, FeedSnapshot, OpenRequest, ReplyRequest, SuggestRequest, SuggestResponse } from './contract.ts'
+import { FailureLog } from './failures.ts'
 import { itemKey } from './feed.ts'
+import { sessionsDir } from './home.ts'
 import { PAGE } from './page.ts'
 import { SUGGEST_SYSTEM_PROMPT, Suggester } from './proposals.ts'
-import { ReplySender } from './reply.ts'
-import { startServer } from './server.ts'
-import { CodexTranscripts, readLastStatus } from './sources.ts'
-import { FLAGS_KEY, FeedStore } from './store.ts'
+import { NOT_IN_TMUX, ReplySender } from './reply.ts'
+import { startServer, type DecisionCenterServer } from './server.ts'
+import type { Session } from './session.ts'
+import { SessionLog, viewSessions, type SessionView } from './sessionlog.ts'
+import { CodexTranscripts } from './sources.ts'
+import { jsonFile } from './storage.ts'
+import { FeedStore } from './store.ts'
+import { TerminalError } from './terminal.ts'
+import { focus, panes, screen, send, tmuxSockets } from './tmux.ts'
 
-/** The `orca` object handed to a plugin worker's `activate` (pluginApi 1). */
-export interface OrcaWorkerApi {
-  commands: { register(id: string, handler: (args: unknown) => unknown): void }
-  events: { on(event: string, handler: (payload: unknown) => void | Promise<void>): void }
-  host: { call(method: string, params?: unknown): Promise<unknown> }
+// Catches what no hook reports: a process that died, an ask answered with Esc.
+const POLL_MS = 30_000
+const EVENT_DEBOUNCE_MS = 300
+const PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000
+const SUGGEST_MODEL = 'haiku'
+
+/** Claude's hook names its process; a process that started after the session's first event is a reused pid. */
+function claudeAlive(session: Session, procs: Proc[] | null): boolean {
+  if (!procs || session.pid === null) {
+    return true
+  }
+  const proc = procs.find((candidate) => candidate.pid === session.pid)
+  return !!proc && proc.startedAt <= session.startedAt
+}
+
+/** Reads the hook's session files and works out which sessions run, and where. */
+function sessionSource(dir: string) {
+  const log = new SessionLog(dir)
+  let bindings = new Map<string, Binding>()
+  let current = new Map<string, Session>()
+
+  async function view(): Promise<SessionView> {
+    const all = await log.refresh()
+    const procs = all.length ? await listProcesses().catch(() => null) : null
+    let dead = new Set<string>()
+    if (procs && all.some((session) => session.agent === 'codex')) {
+      const codex = procs.filter((proc) => proc.name === 'codex' && proc.tty)
+      const cwds = await processCwds(codex.map((proc) => proc.pid)).catch(() => null)
+      if (cwds) {
+        const bound = bindCodex({
+          sessions: all,
+          previous: bindings,
+          codex: codex.flatMap((proc) => (cwds.has(proc.pid) ? [{ ...proc, cwd: cwds.get(proc.pid)! }] : [])),
+          panes: await panes(tmuxSockets())
+        })
+        bindings = bound.bindings
+        dead = bound.dead
+      }
+    }
+    const placed = all.map((session) => {
+      const binding = session.agent === 'codex' ? bindings.get(session.id) : undefined
+      return binding ? { ...session, pane: binding.pane, pid: binding.pid } : session
+    })
+    const result = viewSessions(placed, (session) => (session.agent === 'codex' ? !dead.has(session.id) : claudeAlive(session, procs)))
+    current = new Map(result.live.map((session) => [session.id, session]))
+    return result
+  }
+
+  return { log, view, session: (id: string) => current.get(id) }
+}
+
+export interface ServeOptions {
+  port: number
+  home: string
   log(message: string): void
 }
 
-// Catches state changes that arrive without an event (e.g. a pane closing).
-const POLL_MS = 30_000
-const EVENT_DEBOUNCE_MS = 300
-const SUGGEST_MODEL = 'haiku'
-
-export default function activate(orca: OrcaWorkerApi): void {
+/** Runs the feed server until the process ends. */
+export async function serve(options: ServeOptions): Promise<DecisionCenterServer> {
+  const { home, log } = options
+  const dir = sessionsDir(home)
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
   const startedAt = Date.now()
+  const sessions = sessionSource(dir)
+  await sessions.log.prune(startedAt, PRUNE_AFTER_MS)
+
   let current: FeedSnapshot | null = null
   let refreshing: Promise<FeedSnapshot> | null = null
   let refreshAgain = false
   let debounce: NodeJS.Timeout | undefined
+  let publishedJson = ''
+  let server: DecisionCenterServer | null = null
+
   const transcripts = new CodexTranscripts()
+  const flags = jsonFile(join(home, 'flags.json'))
   const store = new FeedStore({
-    worktreePs,
-    readLastStatus: () => readLastStatus(),
-    codexQuestion: (entry) => transcripts.pendingQuestion(entry),
-    loadFlags: async () => ((await orca.host.call('storage.get', { key: FLAGS_KEY })) as { value?: unknown } | null)?.value,
-    saveFlags: async (flags) => void (await orca.host.call('storage.set', { key: FLAGS_KEY, value: flags })),
-    log: orca.log
+    sessions: sessions.view,
+    screen,
+    codexQuestion: (path) => transcripts.pendingQuestion(path),
+    loadFlags: flags.load,
+    saveFlags: flags.save,
+    log
   })
 
-  let publishedJson = ''
-
-  /** Pushes the feed to open pages when it changed; other agents' events refresh it often. */
+  /** Pushes the feed to open pages when it changed. */
   function publish(snapshot: FeedSnapshot): void {
     current = snapshot
     const json = JSON.stringify({ ...snapshot, generatedAt: 0 })
     if (json !== publishedJson) {
       publishedJson = json
-      server.then((s) => s.broadcast(snapshot)).catch(() => undefined)
+      server?.broadcast(snapshot)
     }
   }
 
@@ -85,48 +136,53 @@ export default function activate(orca: OrcaWorkerApi): void {
         refreshing = null
         if (refreshAgain) {
           refreshAgain = false
-          void refresh().catch((error: Error) => orca.log(`refresh failed: ${error.message}`))
+          refreshSoon(0)
         }
       })
     return refreshing
   }
 
-  const failures = new FailureLog({
-    load: async () => ((await orca.host.call('storage.get', { key: FAILURES_KEY })) as { value?: unknown } | null)?.value,
-    save: async (list) => void (await orca.host.call('storage.set', { key: FAILURES_KEY, value: list })),
-    log: orca.log
-  })
+  function refreshSoon(delay = EVENT_DEBOUNCE_MS): void {
+    clearTimeout(debounce)
+    debounce = setTimeout(() => void refresh().catch((error: Error) => log(`refresh failed: ${error.message}`)), delay)
+  }
+
+  const failuresFile = jsonFile(join(home, 'failures.json'))
+  const failures = new FailureLog({ load: failuresFile.load, save: failuresFile.save, log })
   const sender = new ReplySender({
-    terminalFor: terminalHandleForPane,
-    screen: terminalScreen,
-    send: terminalSend,
+    terminalFor: async (id) => {
+      const pane = sessions.session(id)?.pane
+      return pane ? { handle: pane } : undefined
+    },
+    screen,
+    send,
     onFailure: (failure) => void failures.add(failure)
   })
 
   async function reply(request: ReplyRequest): Promise<ActionResponse> {
     const result = await sender.send(store.item(request.id), request)
     if (result.ok) {
-      // Why: the agent's next state event can lag; pick the change up now.
-      void refresh().catch((error: Error) => orca.log(`refresh failed: ${error.message}`))
+      // Why: the agent's next hook can lag; pick the change up now.
+      refreshSoon()
     }
     return result
   }
 
-  /**
-   * Shows the item's pane and marks it read. Why read here: Orca exposes no
-   * focused pane, so the feed can't see you visit it (issue 0014).
-   */
+  /** Shows the item's pane and marks it read: the feed can't see you visit a pane. */
   async function open(request: OpenRequest): Promise<ActionResponse> {
     const item = store.item(request.id)
     if (!item) {
       return { ok: false, error: { code: 'not_found', message: `no feed item ${request.id}` } }
     }
-    const terminal = item.kind === 'closed' ? undefined : await terminalHandleForPane(item.id)
-    if (!terminal) {
+    if (item.kind !== 'closed' && !item.terminal) {
+      return { ok: false, error: { code: 'session_closed', message: NOT_IN_TMUX } }
+    }
+    const pane = item.kind === 'closed' ? undefined : sessions.session(item.id)?.pane
+    if (!pane) {
       return { ok: false, error: { code: 'session_closed', message: 'the pane has no live terminal' } }
     }
     try {
-      await terminalSwitch(terminal.handle)
+      await focus(pane)
     } catch (error) {
       const code = error instanceof TerminalError && error.code !== 'cli_failed' ? 'terminal_rejected' : 'cli_failed'
       return { ok: false, error: { code, message: (error as Error).message } }
@@ -134,9 +190,7 @@ export default function activate(orca: OrcaWorkerApi): void {
     return change(store.read(item.id))
   }
 
-  const suggester = new Suggester((input) =>
-    claudePrint(input, { model: SUGGEST_MODEL, systemPrompt: SUGGEST_SYSTEM_PROMPT })
-  )
+  const suggester = new Suggester((input) => claudePrint(input, { model: SUGGEST_MODEL, systemPrompt: SUGGEST_SYSTEM_PROMPT }))
 
   /** Asks Haiku for replies to a finished turn with none in its message (issue 0009). */
   async function suggest(request: SuggestRequest): Promise<SuggestResponse | ApiError> {
@@ -154,8 +208,8 @@ export default function activate(orca: OrcaWorkerApi): void {
     }
   }
 
-  const server = startServer({
-    port: DEFAULT_PORT,
+  server = await startServer({
+    port: options.port,
     page: PAGE,
     getFeed: () => (current ? Promise.resolve(current) : refresh()),
     reply,
@@ -169,26 +223,11 @@ export default function activate(orca: OrcaWorkerApi): void {
       return { ok: true }
     },
     health: () => ({ pid: process.pid, startedAt }),
-    log: orca.log
-  })
-  server.then(
-    (s) => orca.log(`serving ${s.url}`),
-    (error: Error) => orca.log(`server failed to start: ${error.message}`)
-  )
-
-  setInterval(() => void refresh().catch((error: Error) => orca.log(`refresh failed: ${error.message}`)), POLL_MS)
-
-  orca.events.on('agent.status.changed', () => {
-    clearTimeout(debounce)
-    debounce = setTimeout(
-      () => void refresh().catch((error: Error) => orca.log(`refresh failed: ${error.message}`)),
-      EVENT_DEBOUNCE_MS
-    )
+    log
   })
 
-  orca.commands.register('open', async () => {
-    const { url } = await server
-    await openBrowserTab(url)
-    return { url }
-  })
+  watch(dir, () => refreshSoon()).on('error', (error) => log(`watching ${dir} failed: ${error.message}`))
+  setInterval(() => refreshSoon(0), POLL_MS)
+  await refresh().catch((error: Error) => log(`refresh failed: ${error.message}`))
+  return server
 }

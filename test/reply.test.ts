@@ -3,8 +3,8 @@ import assert from 'node:assert/strict'
 import type { FeedItem, FeedQuestion, ReplyFailure, ReplyRequest } from '../src/contract.ts'
 import { claudeQuestionCount, describeKey, pickerRows, ReplySender } from '../src/reply.ts'
 
-// Screens captured from real panes with `orca terminal read --screen`
-// (Claude Code 2.1.283, Codex 0.155.1).
+// Screens captured from real panes (Claude Code 2.1.283, Codex 0.155.1). The
+// plain lines match what `tmux capture-pane -p` gives today (issue 0029, fact 23).
 const CLAUDE_IDLE = ['────', '❯', '────', '  ⏸ manual mode on · ← for agents']
 const CLAUDE_SINGLE = [
   '❯ Use the AskUserQuestion tool to ask me which color I prefer.',
@@ -73,8 +73,9 @@ function item(overrides: Partial<FeedItem>): FeedItem {
     agent: 'claude',
     kind: 'finished',
     state: 'done',
-    worktreeId: 'w',
-    worktreeName: 'w',
+    project: 'w',
+    cwd: '/code/w',
+    terminal: { kind: 'tmux', pane: '%1' },
     title: 't',
     prompt: null,
     lastMessage: null,
@@ -94,7 +95,7 @@ function harness(screens: string[][], options: { draft?: string; onFailure?: (fa
   const sent: string[] = []
   let shown = 0
   const sender = new ReplySender({
-    terminalFor: async (paneKey) => (paneKey === 'tab:leaf' ? { handle: 'h' } : undefined),
+    terminalFor: async (id) => (id === 'tab:leaf' ? { handle: { socket: '/s', id: '%1' } } : undefined),
     screen: async () => ({ lines: screens[Math.min(shown++, screens.length - 1)]!, draft: options.draft ?? null }),
     send: async (_handle, input) => {
       sent.push(`${JSON.stringify(input.text ?? '')}${input.enter ? '+enter' : ''}`)
@@ -137,19 +138,6 @@ test('free text never merges with text you half-typed in the pane', async () => 
   assert.equal(code(result), 'terminal_rejected')
   assert.match(!result.ok ? result.error.message : '', /half typed/)
   assert.deepEqual(sent, [])
-})
-
-test("Claude's predicted next prompt in the composer is not a draft", async () => {
-  // Why: Claude Code shows the reply it predicts in the empty composer, and Orca
-  // reports it as a draft (failure logged 2026-09-28).
-  const lastMessage = 'Next: reply "read NTFS dates" (about 1 minute) or "skip, wipe".'
-  const predicted = harness([CLAUDE_IDLE], { draft: 'read NTFS dates' })
-  assert.equal(code(await predicted.sender.send(item({ lastMessage }), text('nevermind. wipe them'))), 'ok')
-  assert.deepEqual(predicted.sent, ['"nevermind. wipe them"+enter'])
-  const typed = harness([CLAUDE_IDLE], { draft: 'read NTFS' })
-  assert.equal(code(await typed.sender.send(item({ lastMessage }), text('hi'))), 'terminal_rejected')
-  const codex = harness([CLAUDE_IDLE], { draft: 'read NTFS dates' })
-  assert.equal(code(await codex.sender.send(item({ agent: 'codex', lastMessage }), text('hi'))), 'terminal_rejected')
 })
 
 test('a Claude option is one bare digit', async () => {
@@ -223,10 +211,12 @@ test('free text to a Codex question is a normal message', async () => {
 
 test('permission asks, closed sessions and unknown items never get keys', async () => {
   const { sender, sent } = harness([CLAUDE_IDLE])
-  const permission = item({ kind: 'permission', state: 'blocked', permission: { toolName: 'Bash', summary: 'rm' } })
+  const permission = item({ kind: 'permission', state: 'waiting', permission: { toolName: 'Bash', summary: 'rm' } })
   assert.equal(code(await sender.send(permission, pick(1))), 'bad_request')
   assert.equal(code(await sender.send(item({ kind: 'closed', state: 'closed' }), text('hi'))), 'session_closed')
   assert.equal(code(await sender.send(item({ id: 'gone:pane' }), text('hi'))), 'session_closed')
+  const outside = await sender.send(item({ terminal: null }), text('hi'))
+  assert.deepEqual(outside.ok ? null : outside.error, { code: 'session_closed', message: 'this session is not running in tmux; reply in its terminal' })
   assert.equal(code(await sender.send(undefined, text('hi'))), 'not_found')
   assert.deepEqual(sent, [])
 })
@@ -407,7 +397,7 @@ test('a failed reply is recorded with the keys already typed and the screen the 
   const claude = item({
     kind: 'question',
     state: 'waiting',
-    worktreeName: 'shop',
+    project: 'shop',
     title: 'order',
     question: parts(titled('Which colour?', ['Red', 'Green', 'Blue']), titled('Which size?', ['Small', 'Medium', 'Large']))
   })

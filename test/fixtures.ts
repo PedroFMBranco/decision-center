@@ -1,21 +1,30 @@
-import type { PsAgent, PsWorktree } from '../src/cli.ts'
+import type { FeedQuestion } from '../src/contract.ts'
+import type { Ask, Session } from '../src/session.ts'
 
-export function agent(overrides: Partial<PsAgent>): PsAgent {
+export function session(overrides: Partial<Session> = {}): Session {
   return {
-    paneKey: 'tab:leaf',
-    parentPaneKey: null,
-    state: 'done',
-    agentType: 'claude',
+    id: 'claude:s1',
+    agent: 'claude',
+    cwd: '/code/app',
+    transcriptPath: null,
+    pane: { socket: '/tmp/tmux-501/default', id: '%1' },
+    pid: 10,
+    startedAt: 0,
+    turn: 'done',
+    turnSince: 1000,
+    pending: null,
     prompt: 'fix the login bug\nmore detail',
-    taskTitle: null,
-    displayName: null,
-    lastAssistantMessage: 'Fixed.',
-    stateStartedAt: 1000,
+    lastMessage: 'Fixed.',
+    ended: false,
     updatedAt: 1000,
     ...overrides
   }
 }
 
-export function worktree(agents: PsAgent[]): PsWorktree {
-  return { worktreeId: 'repo::/code/app', path: '/code/app', displayName: null, isActive: false, agents }
+export function permissionAsk(summary: string, at: number, actor: string | null = null): Ask {
+  return { kind: 'permission', permission: { toolName: 'Bash', summary }, key: `k-${summary}`, actor, at }
+}
+
+export function questionAsk(question: FeedQuestion, at: number): Ask {
+  return { kind: 'question', question, key: 'k-q', actor: null, at }
 }

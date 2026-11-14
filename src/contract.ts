@@ -1,25 +1,24 @@
-// Decision Center HTTP contract, frozen by the walking skeleton (issue 0013).
-// The feed store, reply sender and UI port slices build against it in
-// parallel. Changing a shape here means updating all three.
+// Decision Center HTTP contract. The feed store, reply sender and page build
+// against it. Changing a shape here means updating all three.
 //
-// Transport: the plugin worker serves http://127.0.0.1:<DEFAULT_PORT>. Every
+// Transport: `decision-center serve` serves http://127.0.0.1:<port>. Every
 // POST must carry `Content-Type: application/json`, and requests whose Host
 // or Origin isn't this server are refused (blocks CSRF and DNS rebinding,
 // since the API can type into terminals).
 
-export const API_VERSION = 1
+export const API_VERSION = 2
 export const DEFAULT_PORT = 47823
 
 export type AgentType = 'claude' | 'codex'
 
-/** Orca's raw pane state (`agent-status-types.ts`). */
-export type AgentState = 'working' | 'blocked' | 'waiting' | 'done'
+/** Where the session is: running a turn, waiting on an ask, or done with its turn. */
+export type AgentState = 'working' | 'waiting' | 'done'
 
 /**
  * What the item asks of you. `question` and `permission` group under
  * "Waiting on you", `finished` under "Finished", `closed` under "Session
- * closed". A Codex question can be `kind: 'question'` while Orca says
- * `state: 'done'` (issue 0012).
+ * closed". A Codex question can be `kind: 'question'` with `state: 'done'`:
+ * Codex ends its turn while the question waits (issue 0012).
  */
 export type FeedKind = 'question' | 'permission' | 'finished' | 'closed'
 
@@ -48,15 +47,18 @@ export interface FeedPermission {
 }
 
 export interface FeedItem {
-  /** Orca paneKey, `<tabId>:<leafId>`. Stable for the life of the pane. */
+  /** `<agent>:<session id>`. A new session (including after /clear) is a new item. */
   id: string
   agent: AgentType
   kind: FeedKind
-  /** Orca's state, or `closed` once the pane is gone. */
+  /** The session's state, or `closed` once its process is gone. */
   state: AgentState | 'closed'
-  worktreeId: string
-  worktreeName: string
-  /** Task title, pane display name, or the first line of the first prompt. */
+  /** The last folder of `cwd`. */
+  project: string
+  cwd: string
+  /** The tmux pane the session runs in, or null outside tmux (reply and open are refused). */
+  terminal: { kind: 'tmux'; pane: string } | null
+  /** The first line of the last prompt. */
   title: string
   /** The last prompt you sent this session, if known. */
   prompt: string | null
@@ -68,7 +70,7 @@ export interface FeedItem {
   proposals: string[]
   /** True when no proposals parsed and `POST /api/suggest` can make some. */
   canSuggest: boolean
-  /** Epoch ms the pane entered its current state. */
+  /** Epoch ms the session entered its current state. */
   since: number
   /** Epoch ms of the last change to this item. */
   updatedAt: number
@@ -76,8 +78,8 @@ export interface FeedItem {
 }
 
 /**
- * `GET /api/feed` returns this. Items are already filtered (no `working`
- * panes, no dismissed items, top-level Claude/Codex panes only) and sorted:
+ * `GET /api/feed` returns this. Items are already filtered (no working
+ * sessions, no dismissed items) and sorted:
  * question/permission first, then finished, then closed, newest first.
  */
 export interface FeedSnapshot {
@@ -108,8 +110,8 @@ export interface ReplyRequest {
 }
 
 /**
- * A reply that didn't go through, kept on this Mac only (plugin storage, the
- * latest 50). `GET /api/failures` lists them newest first; `POST
+ * A reply that didn't go through, kept on this machine only
+ * (`<home>/failures.json`, the latest 50). `GET /api/failures` lists them newest first; `POST
  * /api/failures/clear` empties the list.
  */
 export interface ReplyFailure {
@@ -119,7 +121,7 @@ export interface ReplyFailure {
   itemId: string
   agent: AgentType | null
   kind: FeedKind | null
-  /** `worktree / title` of the item, when it was still in the feed. */
+  /** `project / title` of the item, when it was still in the feed. */
   where: string | null
   reply: ReplyRequest['reply']
   code: ApiErrorCode
@@ -145,7 +147,7 @@ export interface ReadRequest {
 /** `POST /api/dismiss` hides one item, or every finished item. */
 export type DismissRequest = { id: string } | { allFinished: true }
 
-/** `POST /api/open` focuses the item's pane in Orca. */
+/** `POST /api/open` shows the item's tmux pane. */
 export interface OpenRequest {
   id: string
 }

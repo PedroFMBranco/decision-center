@@ -1,6 +1,5 @@
 import type { ReplyFailure } from './contract.ts'
 
-export const FAILURES_KEY = 'reply-failures'
 const MAX_FAILURES = 50
 // Why: a typed reply can be long; the report needs its start, not all of it.
 const MAX_TEXT = 2000
@@ -22,7 +21,7 @@ function trimmed(failure: ReplyFailure): ReplyFailure {
   return failure
 }
 
-/** The latest failed replies, newest first, kept in the plugin's own storage. */
+/** The latest failed replies, newest first. */
 export class FailureLog {
   private readonly deps: FailureLogDeps
   private failures: ReplyFailure[] | null = null

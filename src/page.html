@@ -375,7 +375,7 @@ header.top { display: flex; align-items: center; gap: 16px; padding: 14px 20px; 
     <dt><kbd>Enter</kbd> <kbd>n</kbd></dt><dd>During the countdown: send now and move on</dd>
     <dt><kbd>x</kbd></dt><dd>Dismiss this item</dd>
     <dt><kbd>Shift</kbd>+<kbd>X</kbd></dt><dd>Dismiss all finished</dd>
-    <dt><kbd>o</kbd></dt><dd>Open the pane in Orca</dd>
+    <dt><kbd>o</kbd></dt><dd>Show the session's tmux pane</dd>
     <dt><kbd>!</kbd></dt><dd>Failed replies: what was sent, the keys typed, and the pane's screen</dd>
   </dl>
   <div class="prefs"><button class="pillbtn" id="themeBtn"></button><button class="pillbtn" id="densityBtn"></button></div>
@@ -416,8 +416,9 @@ const inFilter = i => filter === "all" || (filter === "waiting" ? GROUPS[0].test
 const shown = () => visible().filter(inFilter);
 const sel = () => items.find(i => i.id === selId);
 function ago(t) { const m = Math.round((Date.now() - t) / min); return m < 1 ? "now" : m < 60 ? m + "m" : Math.floor(m / 60) + "h " + (m % 60) + "m"; }
-const where = i => `<b>${esc(i.worktreeName)}</b> / ${esc(i.title)}`;
-const short = i => i.worktreeName + " / " + (i.title.length > 32 ? i.title.slice(0, 31) + "…" : i.title);
+const NOT_IN_TMUX = "This session is not running in tmux. Reply in its terminal.";
+const where = i => `<b>${esc(i.project)}</b> / ${esc(i.title)}`;
+const short = i => i.project + " / " + (i.title.length > 32 ? i.title.slice(0, 31) + "…" : i.title);
 
 // What each question accepts, mirroring the reply sender's refusals (src/reply.ts).
 const partsOf = i => i.kind === "question" ? [i.question, ...(i.question.more || [])] : [];
@@ -450,8 +451,8 @@ function apply(snapshot) {
 }
 
 // ---------------------------------------------------------------- connection
-// The page outlives the server: after an Orca launch or a worker restart nothing serves until the next agent
-// event or "Decision Center: Open". Keep the last feed on screen, say so, and keep retrying.
+// The page outlives the server: nothing serves until `decision-center serve` runs again.
+// Keep the last feed on screen, say so, and keep retrying.
 let stream = null, retryTimer = null;
 function connect() {
   clearTimeout(retryTimer);
@@ -471,7 +472,7 @@ function setConn(state) {
   el.querySelector("span").textContent = state === "live" ? "Live" : state === "down" ? "Not running" : "Connecting";
   const banner = $("#banner");
   banner.classList.toggle("on", state === "down");
-  if (state === "down") banner.innerHTML = `<span><b>Decision Center isn't running.</b> Press <kbd>⌘J</kbd> in Orca and run <b>Decision Center: Open</b>. Retrying every ${RETRY_MS / 1000} s.</span><small>${lastLiveAt ? "Showing the feed from " + new Date(lastLiveAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "No feed yet"}</small>`;
+  if (state === "down") banner.innerHTML = `<span><b>Decision Center isn't running.</b> Run <b>decision-center serve</b> in a terminal. Retrying every ${RETRY_MS / 1000} s.</span><small>${lastLiveAt ? "Showing the feed from " + new Date(lastLiveAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "No feed yet"}</small>`;
 }
 
 async function post(path, body) {
@@ -621,11 +622,11 @@ function renderDetail() {
     <div class="d-head s-${k} ${fresh ? "reveal" : ""}">
       <button class="pillbtn back" data-act="back" aria-label="Back to the feed">←</button>
       <div class="where">
-        <h2>${esc(i.worktreeName)} <span>/ ${esc(i.title)}</span></h2>
+        <h2>${esc(i.project)} <span>/ ${esc(i.title)}</span></h2>
         <div class="meta"><span class="statepill"><i></i>${STATE_LABEL[k]}</span><span class="chipmeta"><i class="adot ${i.agent}"></i>${i.agent}</span><span>${ago(i.since) === "now" ? "just now" : ago(i.since) + " ago"}</span></div>
       </div>
       <span class="spacer"></span>
-      ${i.kind === "closed" ? "" : `<button class="pillbtn" data-act="open">Open pane <kbd>o</kbd></button>`}
+      ${i.kind === "closed" || !i.terminal ? "" : `<button class="pillbtn" data-act="open">Open pane <kbd>o</kbd></button>`}
       <button class="pillbtn" data-act="dismiss">Dismiss <kbd>x</kbd></button>
     </div>
     <div class="d-body s-${k} ${fresh ? "reveal" : ""}">
@@ -641,11 +642,12 @@ function renderDetail() {
 
 function errorRow(i) {
   const e = errors[i.id]; if (!e) return "";
-  return `<div class="err" role="alert"><b>Not sent.</b><span>${esc(e.message)}</span><button class="pillbtn" data-act="fail-details">Details <kbd>!</kbd></button>${i.kind !== "closed" ? `<button class="pillbtn" data-act="open">Open pane <kbd>o</kbd></button>` : ""}</div>`;
+  return `<div class="err" role="alert"><b>Not sent.</b><span>${esc(e.message)}</span><button class="pillbtn" data-act="fail-details">Details <kbd>!</kbd></button>${i.kind !== "closed" && i.terminal ? `<button class="pillbtn" data-act="open">Open pane <kbd>o</kbd></button>` : ""}</div>`;
 }
 function dockHtml(i) {
   const k = stateKey(i);
   if (i.kind === "closed") return `<div class="dock s-${k}"><p class="sent-note">The session is closed. The message stays readable until you dismiss it.</p></div>`;
+  if (!i.terminal) return `<div class="dock s-${k}"><p class="sent-note">This session is not running in tmux, so replies from here can't reach it. Reply in its terminal.</p></div>`;
   if (advancing?.from === i.id) return `<div class="dock s-${k}"><p class="sent-note"><span class="spin"></span>Sending <b>${esc(advancing.label)}</b> when the countdown ends. <kbd>Esc</kbd> to undo and stay.</p></div>`;
   if (posting[i.id]) return `<div class="dock s-${k}"><p class="sent-note"><span class="spin"></span>Sending <b>${esc(posting[i.id].label)}</b>…</p></div>`;
   if (isSent(i)) return `<div class="dock s-${k}"><p class="sent-note"><span class="spin"></span>Sent <b>${esc(sent[i.id].label)}</b>. ${i.agent} is working. This item leaves the feed when you move on.</p></div>`;
@@ -717,13 +719,15 @@ async function dismissFinished() {
 }
 async function openPane(i) {
   if (!i || i.kind === "closed") return;
+  if (!i.terminal) return toast(NOT_IN_TMUX, true);
   const r = await post("/api/open", { id: i.id }); // it also marks the item read; the feed push follows
-  toast(r.ok ? `Opened ${short(i)} in Orca.` : "Couldn't open the pane: " + r.error.message, !r.ok);
+  toast(r.ok ? `Showing ${short(i)} in tmux.` : "Couldn't open the pane: " + r.error.message, !r.ok);
 }
 
 // ---- every reply gets one countdown, shown in the dynamic island; the reply is held until it runs out.
 // Undo (Esc) cancels the reply and you stay with your draft. Timeout sends it and goes to the next item in the queue.
 function send(i, label, reply) {
+  if (!i.terminal) return toast(NOT_IN_TMUX, true);
   if (advancing) settle();
   delete errors[i.id];
   const draft = drafts[i.id] || ""; drafts[i.id] = "";
@@ -734,7 +738,7 @@ function send(i, label, reply) {
   render();
   const isl = $("#island");
   isl.innerHTML = `<span class="ringwrap"><svg viewBox="0 0 36 36" aria-hidden="true"><circle class="track" r="15" cx="18" cy="18"/><circle class="prog" r="15" cx="18" cy="18" pathLength="100" style="animation-duration:${COUNTDOWN_MS}ms"/></svg><span class="secs" id="isecs">${COUNTDOWN_MS / 1000}</span></span>
-    <span class="txt"><small>Sending ${esc(label)}</small><span>${next ? `then ${GLYPH[stateKey(next)]} ${esc(next.worktreeName)} / ${esc(next.title)} →` : `to ${esc(i.worktreeName)} / ${esc(i.title)}`}</span></span>
+    <span class="txt"><small>Sending ${esc(label)}</small><span>${next ? `then ${GLYPH[stateKey(next)]} ${esc(next.project)} / ${esc(next.title)} →` : `to ${esc(i.project)} / ${esc(i.title)}`}</span></span>
     <button data-act="stay">Undo <kbd>Esc</kbd></button><button class="go" data-act="go-next">Send now <kbd>↵</kbd></button>
     <i class="line" style="animation-duration:${COUNTDOWN_MS}ms"></i>`;
   const r = $("#detail").getBoundingClientRect(); isl.style.left = (r.width ? r.left + r.width / 2 : innerWidth / 2) + "px"; // centre over the detail pane
@@ -852,7 +856,7 @@ async function loadFailures() {
 }
 function noteFailure(i, reply, error) {
   if (error.code !== "offline" && error.code !== "bad_response") return loadFailures();
-  localFailures.unshift({ id: "local-" + Date.now(), at: Date.now(), itemId: i.id, agent: i.agent, kind: i.kind, where: i.worktreeName + " / " + i.title, reply, code: error.code, message: error.message, keysSent: [], screen: null, draft: null });
+  localFailures.unshift({ id: "local-" + Date.now(), at: Date.now(), itemId: i.id, agent: i.agent, kind: i.kind, where: i.project + " / " + i.title, reply, code: error.code, message: error.message, keysSent: [], screen: null, draft: null });
   renderFailures();
 }
 function replySummary(r) {
@@ -923,7 +927,7 @@ applyPrefs();
 let pIdx = 0;
 function openPalette() { $("#palette").classList.add("on"); $("#pq").value = ""; pIdx = 0; renderPalette(); $("#pq").focus(); }
 function closePalette() { $("#palette").classList.remove("on"); }
-function paletteList() { const q = $("#pq").value.toLowerCase(); return visible().filter(i => (i.worktreeName + " " + i.title + " " + i.agent + " " + previewOf(i)).toLowerCase().includes(q)); }
+function paletteList() { const q = $("#pq").value.toLowerCase(); return visible().filter(i => (i.project + " " + i.title + " " + i.agent + " " + previewOf(i)).toLowerCase().includes(q)); }
 function renderPalette() {
   const l = paletteList(); pIdx = Math.min(pIdx, Math.max(0, l.length - 1));
   $("#plist").innerHTML = l.length ? l.map((i, n) => `<div class="popt s-${stateKey(i)} ${n === pIdx ? "on" : ""}" data-pid="${esc(i.id)}">${orb(i)}<span>${where(i)}<br><small>${esc(previewOf(i).slice(0, 80))}</small></span><small>${STATE_LABEL[stateKey(i)]}</small></div>`).join("")

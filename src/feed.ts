@@ -1,9 +1,7 @@
-import type { AgentState, AgentType, FeedItem, FeedKind, FeedSnapshot } from './contract.ts'
+import type { FeedItem, FeedKind, FeedQuestion, FeedSnapshot } from './contract.ts'
 import { API_VERSION } from './contract.ts'
-import type { PsAgent, PsWorktree } from './cli.ts'
-import type { FeedQuestion } from './contract.ts'
 import { parseProposals } from './proposals.ts'
-import { parseInteractivePrompt, type LastStatusEntry } from './sources.ts'
+import type { Ask, Session } from './session.ts'
 
 const GROUP_ORDER: Record<FeedKind, number> = { question: 0, permission: 0, finished: 1, closed: 2 }
 
@@ -16,86 +14,61 @@ function basename(path: string): string {
   return path.split('/').filter(Boolean).pop() ?? path
 }
 
-/** Orca's own question-tool test (agent-question-answered-intent.js). */
-function isQuestionTool(name: string | null | undefined): boolean {
-  const normalized = (name ?? '').replace(/[^a-z0-9]/gi, '').toLowerCase()
-  return normalized === 'askuserquestion' || normalized === 'requestuserinput'
-}
-
-/** What the store knows about a pane beyond `worktree ps`. */
-export interface PaneContext {
-  entry?: LastStatusEntry
-  /** Pending Codex question from the transcript, for a `done` Codex pane. */
+/** What the store knows about a session beyond its events. */
+export interface SessionContext {
+  /** The session's ask, unless its pane shows it was answered without a hook. */
+  pending: Ask | null
+  /** A Codex question read from the transcript, for a Codex session whose turn is done. */
   codexQuestion?: FeedQuestion | null
 }
 
-function classify(
-  agent: PsAgent,
-  context: PaneContext
-): Pick<FeedItem, 'kind' | 'question' | 'permission'> | null {
-  if (agent.state === 'done') {
-    return context.codexQuestion
-      ? { kind: 'question', question: context.codexQuestion, permission: null }
-      : { kind: 'finished', question: null, permission: null }
+type Classified = Pick<FeedItem, 'kind' | 'state' | 'question' | 'permission' | 'since'>
+
+function classify(session: Session, context: SessionContext): Classified | null {
+  const { pending } = context
+  if (pending?.kind === 'question') {
+    return { kind: 'question', state: 'waiting', question: pending.question, permission: null, since: pending.at }
   }
-  if (agent.state !== 'waiting' && agent.state !== 'blocked') {
+  if (pending?.kind === 'permission') {
+    return { kind: 'permission', state: 'waiting', question: null, permission: pending.permission, since: pending.at }
+  }
+  if (session.turn !== 'done') {
     return null
   }
-  // Why: the hook file keeps the last payload even after the pane moved on,
-  // so only trust its prompt while it describes the same state.
-  const payload = context.entry?.payload?.state === agent.state ? context.entry.payload : undefined
-  const { question, permission } = parseInteractivePrompt(payload?.interactivePrompt)
-  if (question) {
-    return { kind: 'question', question, permission: null }
-  }
-  if (permission) {
-    return { kind: 'permission', question: null, permission }
-  }
-  const toolName = payload?.toolName ?? agent.toolName ?? null
-  if (agent.state === 'waiting' && isQuestionTool(toolName)) {
-    const title = firstLine(agent.lastAssistantMessage, 200) || 'Question'
-    return { kind: 'question', question: { title, multiSelect: false, options: [] }, permission: null }
-  }
-  return {
-    kind: 'permission',
-    question: null,
-    permission: { toolName: toolName ?? 'unknown tool', summary: firstLine(payload?.toolInput ?? agent.toolInput, 200) }
-  }
+  return context.codexQuestion
+    ? { kind: 'question', state: 'done', question: context.codexQuestion, permission: null, since: session.turnSince }
+    : { kind: 'finished', state: 'done', question: null, permission: null, since: session.turnSince }
 }
 
-/** A top-level Claude or Codex pane that isn't working, as a feed item. */
-export function itemFromAgent(worktree: PsWorktree, agent: PsAgent, context: PaneContext = {}): FeedItem | null {
-  if (agent.parentPaneKey || (agent.agentType !== 'claude' && agent.agentType !== 'codex')) {
-    return null
-  }
-  const classified = classify(agent, context)
+/** A session that waits on you or finished its turn, as a feed item. Null while it works. */
+export function itemFromSession(session: Session, context: SessionContext): FeedItem | null {
+  const classified = classify(session, context)
   if (!classified) {
     return null
   }
   // Questions answer with their own options; only finished turns get proposals.
   const finished = classified.kind === 'finished'
-  const proposals = finished ? parseProposals(agent.lastAssistantMessage) : []
+  const proposals = finished ? parseProposals(session.lastMessage) : []
   return {
-    id: agent.paneKey,
-    agent: agent.agentType as AgentType,
+    id: session.id,
+    agent: session.agent,
     ...classified,
-    state: agent.state as AgentState,
-    worktreeId: worktree.worktreeId,
-    worktreeName: worktree.displayName || basename(worktree.path),
-    title: agent.taskTitle || agent.displayName || firstLine(agent.prompt) || 'Untitled session',
-    prompt: agent.prompt,
-    lastMessage: agent.lastAssistantMessage,
+    project: basename(session.cwd) || session.cwd,
+    cwd: session.cwd,
+    terminal: session.pane ? { kind: 'tmux', pane: session.pane.id } : null,
+    title: firstLine(session.prompt) || 'Untitled session',
+    prompt: session.prompt,
+    lastMessage: session.lastMessage,
     proposals,
-    canSuggest: finished && !proposals.length && !!agent.lastAssistantMessage?.trim(),
-    since: agent.stateStartedAt,
-    updatedAt: agent.updatedAt,
+    canSuggest: finished && !proposals.length && !!session.lastMessage?.trim(),
+    updatedAt: session.updatedAt,
     unread: true
   }
 }
 
 /**
- * Identifies one waiting episode of a pane. Read and dismissed flags hold the
- * key they were set for, so a new episode shows up unread again (issue 0006).
+ * Identifies one waiting episode of a session. Read and dismissed flags hold
+ * the key they were set for, so a new episode shows up unread again (issue 0006).
  */
 export function itemKey(item: Pick<FeedItem, 'since' | 'kind'>): string {
   return `${item.since}:${item.kind}`

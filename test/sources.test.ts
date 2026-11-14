@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { CodexTranscripts, pendingCodexQuestion, readLastStatus } from '../src/sources.ts'
+import { CodexTranscripts, pendingCodexQuestion } from '../src/sources.ts'
 
 const line = (payload: object) => JSON.stringify({ type: 'response_item', payload })
 const userMessage = line({ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] })
@@ -37,19 +37,15 @@ test('a user message after the question answers it', () => {
   assert.equal(pendingCodexQuestion([userMessage, noise]), null)
 })
 
-test('reads a pending question from the transcript path, and none without one', async () => {
+test('reads a pending question from the transcript path, and none from a missing file', async () => {
   const root = mkdtempSync(join(tmpdir(), 'dc-codex-'))
   try {
     const path = join(root, 'rollout-abc.jsonl')
     writeFileSync(path, [userMessage, askCall, ''].join('\n'))
     const transcripts = new CodexTranscripts()
-    assert.equal((await transcripts.pendingQuestion({ paneKey: 'p', providerSession: { transcriptPath: path } }))?.title, 'Which color?')
-    assert.equal(await transcripts.pendingQuestion({ paneKey: 'p', providerSession: { id: 'abc' } }), null)
+    assert.equal((await transcripts.pendingQuestion(path))?.title, 'Which color?')
+    assert.equal(await transcripts.pendingQuestion(join(root, 'missing.jsonl')), null)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
-})
-
-test('a missing hook file reads as no entries', async () => {
-  assert.equal((await readLastStatus('/nonexistent/last-status.json')).size, 0)
 })
