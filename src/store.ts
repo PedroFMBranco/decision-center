@@ -38,6 +38,32 @@ export interface StoreDeps {
   now?(): number
 }
 
+/** How many lines above the composer Codex's notice can start, wrapped text included. */
+const NOTICE_LINES = 8
+
+/**
+ * Codex's `■` notice when it is the last thing above the composer, else null.
+ * A prompt (`›`) or agent output (`•`) below the notice means a newer turn runs.
+ */
+export function codexStopNotice(lines: string[]): string | null {
+  const filled = lines.filter((line) => line.trim())
+  const composer = filled.findLastIndex((line) => /^›(\s|$)/.test(line))
+  for (let i = composer - 1; i >= Math.max(0, composer - NOTICE_LINES); i--) {
+    const line = filled[i]!
+    if (line.startsWith('■')) {
+      return filled
+        .slice(i, composer)
+        .map((part) => part.trim())
+        .join(' ')
+        .replace(/^■\s*/, '')
+    }
+    if (/^[›•]/.test(line)) {
+      return null
+    }
+  }
+  return null
+}
+
 function isStoredFlags(value: unknown): value is StoredFlags {
   const flags = value as StoredFlags | null
   return flags?.v === 1 && typeof flags.installedAt === 'number' && typeof flags.sessions === 'object' && !!flags.sessions
@@ -164,6 +190,23 @@ export class FeedStore {
     }
   }
 
+  /**
+   * What the pane says ended the session's turn, when no hook did. Why: a
+   * Codex turn that fails (a refused model, a dropped connection) or is
+   * interrupted fires no Stop hook, and the session then waits at its composer.
+   */
+  private async stoppedOnScreen(session: Session, now: number): Promise<string | null> {
+    const { pane } = session
+    if (session.agent !== 'codex' || session.turn !== 'working' || session.pending || !pane || session.turnSince > now - SILENT_CHECK_AFTER_MS) {
+      return null
+    }
+    try {
+      return codexStopNotice((await this.deps.screen(pane)).lines)
+    } catch {
+      return null
+    }
+  }
+
   /** The item for a session as the feed last saw it, dismissed or closed ones included. */
   item(id: string): FeedItem | undefined {
     return this.find(id)?.item
@@ -189,7 +232,13 @@ export class FeedStore {
           ? await this.deps.codexQuestion(session.transcriptPath)
           : null
       const cancelled = onScreen === 'interrupted' && session.pending && !session.pending.actor && session.turn === 'working'
-      const item = itemFromSession(session, { pending, codexQuestion, ...(cancelled ? { cancelledAt: session.pending!.at } : {}) })
+      const notice = await this.stoppedOnScreen(session, now)
+      const item = itemFromSession(session, {
+        pending,
+        codexQuestion,
+        ...(cancelled ? { cancelledAt: session.pending!.at } : {}),
+        ...(notice ? { stopped: { at: session.turnSince, notice } } : {})
+      })
       if (item) {
         next.set(item.id, item)
       }

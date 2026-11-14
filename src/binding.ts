@@ -1,7 +1,8 @@
 // A Codex hook runs in a shared daemon, so it can't say which pane its session
 // is in. The server finds the pane from the `codex` process on the pane's tty.
 import { execFile } from 'node:child_process'
-import { basename } from 'node:path'
+import { homedir } from 'node:os'
+import { basename, isAbsolute, join, relative } from 'node:path'
 import type { PaneRef } from './events.ts'
 import type { Session } from './session.ts'
 import type { TmuxPane } from './tmux.ts'
@@ -86,6 +87,15 @@ const paneKey = (pane: PaneRef) => `${pane.socket}\0${pane.id}`
  * no process left. A process can only be a session's if it started before
  * the session's first event and runs in the session's folder.
  */
+/**
+ * Whether a Codex session is one Codex runs for itself. Its memory writer
+ * starts sessions in `<codex home>/memories`, which nobody asked for or can reply to.
+ */
+export function codexInternal(session: Session, env: NodeJS.ProcessEnv = process.env): boolean {
+  const fromHome = relative(join(env.CODEX_HOME || join(homedir(), '.codex'), 'memories'), session.cwd)
+  return session.agent === 'codex' && !fromHome.startsWith('..') && !isAbsolute(fromHome)
+}
+
 export function bindCodex(input: {
   sessions: Session[]
   previous: Map<string, Binding>

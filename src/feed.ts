@@ -25,6 +25,8 @@ export interface SessionContext {
    * fires for that, and the agent then waits at its composer like a finished turn.
    */
   cancelledAt?: number
+  /** A turn that ended with no hook, and what the pane says about it (a failure or an interruption). */
+  stopped?: { at: number; notice: string }
 }
 
 type Classified = Pick<FeedItem, 'kind' | 'state' | 'question' | 'permission' | 'since'>
@@ -39,6 +41,9 @@ function classify(session: Session, context: SessionContext): Classified | null 
   }
   if (context.cancelledAt !== undefined) {
     return { kind: 'finished', state: 'done', question: null, permission: null, since: context.cancelledAt }
+  }
+  if (context.stopped) {
+    return { kind: 'finished', state: 'done', question: null, permission: null, since: context.stopped.at }
   }
   if (session.turn !== 'done') {
     return null
@@ -56,7 +61,9 @@ export function itemFromSession(session: Session, context: SessionContext): Feed
   }
   // Questions answer with their own options; only finished turns get proposals.
   const finished = classified.kind === 'finished'
-  const proposals = finished ? parseProposals(session.lastMessage) : []
+  // Why the notice: the last message is from the turn before the one that stopped.
+  const lastMessage = context.stopped && !context.pending ? context.stopped.notice : session.lastMessage
+  const proposals = finished ? parseProposals(lastMessage) : []
   return {
     id: session.id,
     agent: session.agent,
@@ -66,9 +73,9 @@ export function itemFromSession(session: Session, context: SessionContext): Feed
     terminal: session.pane ? { kind: 'tmux', pane: session.pane.id } : null,
     title: firstLine(session.prompt) || 'Untitled session',
     prompt: session.prompt,
-    lastMessage: session.lastMessage,
+    lastMessage,
     proposals,
-    canSuggest: finished && !proposals.length && !!session.lastMessage?.trim(),
+    canSuggest: finished && !context.stopped && !proposals.length && !!lastMessage?.trim(),
     updatedAt: session.updatedAt,
     unread: true
   }

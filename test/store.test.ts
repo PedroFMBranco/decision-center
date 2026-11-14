@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { FeedQuestion } from '../src/contract.ts'
 import type { Session } from '../src/session.ts'
-import { FeedStore, type StoredFlags } from '../src/store.ts'
+import { codexStopNotice, FeedStore, type StoredFlags } from '../src/store.ts'
 import { permissionAsk, session } from './fixtures.ts'
 
 const HOUR = 60 * 60 * 1000
@@ -208,4 +208,45 @@ test("a Codex session's transcript question shows once its turn is done", async 
     s('y', { id: 'codex:y', agent: 'codex', transcriptPath: '/t.jsonl', turn: 'working' })
   ]
   assert.deepEqual((await store.refresh()).items.map((i) => [i.id, i.kind, i.question?.title]), [['codex:x', 'question', 'Pick']])
+})
+
+// As captured live: Codex 0.158.0 refused the configured model and fired no Stop hook.
+const CODEX_FAILED = [
+  '› hi',
+  '',
+  '■ {"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The \'gpt-6.1-terra\' model is not',
+  'supported when using Codex with a ChatGPT account.","code":"model_not_found"}}',
+  '',
+  '› Ask Codex to do anything',
+  '  gpt-6.1-terra medium · ~/claude_workspace'
+]
+
+test('a Codex turn that failed or was interrupted with no hook becomes a finished item that shows the notice', async () => {
+  const { world, store } = harness()
+  const working = { id: 'codex:c', agent: 'codex' as const, turn: 'working' as const, turnSince: NOW - 4000, lastMessage: 'from the turn before' }
+  world.sessions = [s('c', working)]
+  world.screen = CODEX_FAILED
+  const failed = await store.refresh()
+  assert.deepEqual(failed.items.map((i) => [i.kind, i.since, i.canSuggest]), [['finished', NOW - 4000, false]])
+  assert.match(failed.items[0]!.lastMessage!, /^\{"type":"error".*model is not supported when using Codex with a ChatGPT account/)
+  world.screen = [...CODEX_FAILED.slice(0, 5), '› try again', '', '• Working (2s • esc to interrupt)', '', ...CODEX_FAILED.slice(5)]
+  assert.deepEqual((await store.refresh()).items, [])
+  world.screen = [...CODEX_FAILED.slice(0, 5), '› try again', '', ...CODEX_FAILED.slice(5)]
+  assert.deepEqual((await store.refresh()).items, [])
+  world.screen = new Error('pane in copy mode')
+  assert.deepEqual((await store.refresh()).items, [])
+})
+
+test('the stop check leaves alone a new turn, a session outside tmux, a Claude session and a finished turn', async () => {
+  const { world, store } = harness()
+  world.screen = CODEX_FAILED
+  world.sessions = [
+    s('fresh', { id: 'codex:fresh', agent: 'codex', turn: 'working', turnSince: NOW - 1000 }),
+    s('outside', { id: 'codex:outside', agent: 'codex', turn: 'working', turnSince: NOW - 9000, pane: null }),
+    s('claude', { turn: 'working', turnSince: NOW - 9000 })
+  ]
+  assert.deepEqual((await store.refresh()).items, [])
+  assert.equal(world.screenReads, 0)
+  assert.equal(codexStopNotice(['• done', '', '› Ask Codex to do anything']), null)
+  assert.equal(codexStopNotice(CODEX_DENIED), 'Conversation interrupted - tell the model what to do differently. Something went wrong? Hit `/feedback` to report the issue.')
 })

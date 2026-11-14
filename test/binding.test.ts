@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { realpathSync } from 'node:fs'
-import { bindCodex, claudeInteractive, listProcesses, processCwds, type Binding, type CodexProc } from '../src/binding.ts'
+import { bindCodex, claudeInteractive, codexInternal, listProcesses, processCwds, type Binding, type CodexProc } from '../src/binding.ts'
 import { session as fixtureSession } from './fixtures.ts'
 import { reduce, type Session } from '../src/session.ts'
 import type { TmuxPane } from '../src/tmux.ts'
@@ -84,4 +84,15 @@ test('a Claude session is live while its process runs in a terminal; headless ru
   assert.equal(claudeInteractive(claude, [{ ...proc, startedAt: 11_000 }]), false)
   assert.equal(claudeInteractive(claude, []), false)
   assert.equal(claudeInteractive(claude, null), true)
+})
+
+test("Codex's own memory-writing sessions are told apart by their folder", () => {
+  const at = (agent: 'claude' | 'codex', cwd: string) => ({ agent, cwd }) as Parameters<typeof codexInternal>[0]
+  const env = { CODEX_HOME: '/home/u/.codex' }
+  assert.equal(codexInternal(at('codex', '/home/u/.codex/memories'), env), true)
+  assert.equal(codexInternal(at('codex', '/home/u/.codex/memories/phase2'), env), true)
+  assert.equal(codexInternal(at('codex', '/home/u/.codex'), env), false)
+  assert.equal(codexInternal(at('codex', '/home/u/.codex/memories-notes'), env), false)
+  assert.equal(codexInternal(at('codex', '/code/app'), env), false)
+  assert.equal(codexInternal(at('claude', '/home/u/.codex/memories'), env), false)
 })

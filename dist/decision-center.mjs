@@ -3,8 +3,8 @@
 // src/cli.ts
 import { execFile as execFile4, spawnSync as spawnSync2 } from "node:child_process";
 import { existsSync as existsSync3, readdirSync as readdirSync2, readFileSync as readFileSync2 } from "node:fs";
-import { homedir as homedir3 } from "node:os";
-import { join as join9 } from "node:path";
+import { homedir as homedir4 } from "node:os";
+import { join as join10 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // src/contract.ts
@@ -370,11 +370,12 @@ async function updateShellFile(path, block, options) {
 // src/main.ts
 import { mkdirSync as mkdirSync2, watch } from "node:fs";
 import { realpath as realpath2 } from "node:fs/promises";
-import { join as join8 } from "node:path";
+import { join as join9 } from "node:path";
 
 // src/binding.ts
 import { execFile } from "node:child_process";
-import { basename as basename2 } from "node:path";
+import { homedir as homedir2 } from "node:os";
+import { basename as basename2, isAbsolute, join as join4, relative } from "node:path";
 function run(command, args) {
   return new Promise((resolve, reject) => {
     execFile(
@@ -425,6 +426,10 @@ async function processCwds(pids) {
   return cwds;
 }
 var paneKey = (pane) => `${pane.socket}\0${pane.id}`;
+function codexInternal(session, env = process.env) {
+  const fromHome = relative(join4(env.CODEX_HOME || join4(homedir2(), ".codex"), "memories"), session.cwd);
+  return session.agent === "codex" && !fromHome.startsWith("..") && !isAbsolute(fromHome);
+}
 function bindCodex(input) {
   const panesByKey = new Map(input.panes.filter((pane) => !pane.dead).map((pane) => [paneKey(pane), pane]));
   const running = new Set(input.codex.map((proc) => proc.pid));
@@ -466,12 +471,12 @@ function bindCodex(input) {
 // src/claude.ts
 import { execFile as execFile2 } from "node:child_process";
 import { existsSync as existsSync2 } from "node:fs";
-import { homedir as homedir2, tmpdir } from "node:os";
-import { join as join4 } from "node:path";
+import { homedir as homedir3, tmpdir } from "node:os";
+import { join as join5 } from "node:path";
 function resolveClaudeBin() {
   const candidates = [
-    join4(homedir2(), ".local", "bin", "claude"),
-    join4(homedir2(), ".claude", "local", "claude"),
+    join5(homedir3(), ".local", "bin", "claude"),
+    join5(homedir3(), ".claude", "local", "claude"),
     "/opt/homebrew/bin/claude",
     "/usr/local/bin/claude"
   ];
@@ -703,6 +708,9 @@ function classify(session, context) {
   if (context.cancelledAt !== void 0) {
     return { kind: "finished", state: "done", question: null, permission: null, since: context.cancelledAt };
   }
+  if (context.stopped) {
+    return { kind: "finished", state: "done", question: null, permission: null, since: context.stopped.at };
+  }
   if (session.turn !== "done") {
     return null;
   }
@@ -714,7 +722,8 @@ function itemFromSession(session, context) {
     return null;
   }
   const finished = classified.kind === "finished";
-  const proposals = finished ? parseProposals(session.lastMessage) : [];
+  const lastMessage = context.stopped && !context.pending ? context.stopped.notice : session.lastMessage;
+  const proposals = finished ? parseProposals(lastMessage) : [];
   return {
     id: session.id,
     agent: session.agent,
@@ -724,9 +733,9 @@ function itemFromSession(session, context) {
     terminal: session.pane ? { kind: "tmux", pane: session.pane.id } : null,
     title: firstLine(session.prompt) || "Untitled session",
     prompt: session.prompt,
-    lastMessage: session.lastMessage,
+    lastMessage,
     proposals,
-    canSuggest: finished && !proposals.length && !!session.lastMessage?.trim(),
+    canSuggest: finished && !context.stopped && !proposals.length && !!lastMessage?.trim(),
     updatedAt: session.updatedAt,
     unread: true
   };
@@ -1417,7 +1426,7 @@ data: ${JSON.stringify(snapshot)}
 
 // src/sessionlog.ts
 import { open as open2, readdir, stat as stat3, unlink } from "node:fs/promises";
-import { join as join5 } from "node:path";
+import { join as join6 } from "node:path";
 
 // src/sources.ts
 import { open, stat as stat2 } from "node:fs/promises";
@@ -1586,7 +1595,7 @@ var SessionLog = class {
     this.dir = dir;
   }
   async read(name) {
-    const path = join5(this.dir, name);
+    const path = join6(this.dir, name);
     let tail = this.tails.get(name) ?? { offset: 0, session: void 0 };
     const { size } = await stat3(path);
     if (size < tail.offset) {
@@ -1636,7 +1645,7 @@ var SessionLog = class {
   /** Deletes session files with no event for `maxAgeMs`. */
   async prune(now, maxAgeMs) {
     for (const name of await readdir(this.dir).catch(() => [])) {
-      const path = join5(this.dir, name);
+      const path = join6(this.dir, name);
       const info = await stat3(path).catch(() => null);
       if (name.endsWith(".jsonl") && info && info.mtimeMs < now - maxAgeMs) {
         await unlink(path).catch(() => void 0);
@@ -1668,7 +1677,7 @@ function viewSessions(sessions, alive) {
 // src/storage.ts
 import { randomBytes as randomBytes2 } from "node:crypto";
 import { mkdir as mkdir2, readFile as readFile2, rename as rename2, writeFile as writeFile2 } from "node:fs/promises";
-import { dirname as dirname2, join as join6 } from "node:path";
+import { dirname as dirname2, join as join7 } from "node:path";
 function jsonFile(path) {
   return {
     async load() {
@@ -1683,7 +1692,7 @@ function jsonFile(path) {
     },
     async save(value) {
       await mkdir2(dirname2(path), { recursive: true, mode: 448 });
-      const temp = join6(dirname2(path), `.${randomBytes2(6).toString("hex")}.tmp`);
+      const temp = join7(dirname2(path), `.${randomBytes2(6).toString("hex")}.tmp`);
       await writeFile2(temp, `${JSON.stringify(value, null, 2)}
 `, { mode: 384 });
       await rename2(temp, path);
@@ -1696,6 +1705,21 @@ var DAY_MS = 24 * 60 * 60 * 1e3;
 var FIRST_INSTALL_STALE_MS = DAY_MS;
 var FORGET_UNSEEN_MS = 7 * DAY_MS;
 var SILENT_CHECK_AFTER_MS = 3e3;
+var NOTICE_LINES = 8;
+function codexStopNotice(lines) {
+  const filled = lines.filter((line) => line.trim());
+  const composer = filled.findLastIndex((line) => /^›(\s|$)/.test(line));
+  for (let i = composer - 1; i >= Math.max(0, composer - NOTICE_LINES); i--) {
+    const line = filled[i];
+    if (line.startsWith("\u25A0")) {
+      return filled.slice(i, composer).map((part) => part.trim()).join(" ").replace(/^■\s*/, "");
+    }
+    if (/^[›•]/.test(line)) {
+      return null;
+    }
+  }
+  return null;
+}
 function isStoredFlags(value) {
   const flags = value;
   return flags?.v === 1 && typeof flags.installedAt === "number" && typeof flags.sessions === "object" && !!flags.sessions;
@@ -1793,6 +1817,22 @@ var FeedStore = class {
       return "shown";
     }
   }
+  /**
+   * What the pane says ended the session's turn, when no hook did. Why: a
+   * Codex turn that fails (a refused model, a dropped connection) or is
+   * interrupted fires no Stop hook, and the session then waits at its composer.
+   */
+  async stoppedOnScreen(session, now) {
+    const { pane } = session;
+    if (session.agent !== "codex" || session.turn !== "working" || session.pending || !pane || session.turnSince > now - SILENT_CHECK_AFTER_MS) {
+      return null;
+    }
+    try {
+      return codexStopNotice((await this.deps.screen(pane)).lines);
+    } catch {
+      return null;
+    }
+  }
   /** The item for a session as the feed last saw it, dismissed or closed ones included. */
   item(id) {
     return this.find(id)?.item;
@@ -1813,7 +1853,13 @@ var FeedStore = class {
       const pending = onScreen === "shown" ? session.pending : null;
       const codexQuestion = session.agent === "codex" && !pending && session.turn === "done" && session.transcriptPath ? await this.deps.codexQuestion(session.transcriptPath) : null;
       const cancelled = onScreen === "interrupted" && session.pending && !session.pending.actor && session.turn === "working";
-      const item = itemFromSession(session, { pending, codexQuestion, ...cancelled ? { cancelledAt: session.pending.at } : {} });
+      const notice = await this.stoppedOnScreen(session, now);
+      const item = itemFromSession(session, {
+        pending,
+        codexQuestion,
+        ...cancelled ? { cancelledAt: session.pending.at } : {},
+        ...notice ? { stopped: { at: session.turnSince, notice } } : {}
+      });
       if (item) {
         next.set(item.id, item);
       }
@@ -1892,7 +1938,7 @@ var FeedStore = class {
 // src/tmux.ts
 import { execFile as execFile3 } from "node:child_process";
 import { readdirSync, realpathSync, statSync } from "node:fs";
-import { join as join7 } from "node:path";
+import { join as join8 } from "node:path";
 var TIMEOUT_MS = 5e3;
 var ENTER_AFTER_TEXT_MS = 500;
 function tmux(socket, args) {
@@ -1907,10 +1953,10 @@ function tmux(socket, args) {
   });
 }
 function tmuxSockets(env = process.env) {
-  const dir = join7(env.TMUX_TMPDIR || "/tmp", `tmux-${process.getuid?.() ?? 0}`);
+  const dir = join8(env.TMUX_TMPDIR || "/tmp", `tmux-${process.getuid?.() ?? 0}`);
   try {
     return readdirSync(dir).flatMap((name) => {
-      const path = join7(dir, name);
+      const path = join8(dir, name);
       try {
         return statSync(path).isSocket() ? [realpathSync(path)] : [];
       } catch {
@@ -2083,7 +2129,7 @@ function sessionSource(dir) {
       const binding = session.agent === "codex" ? bindings.get(session.id) : void 0;
       return binding ? { ...session, pane: binding.pane, pid: binding.pid } : session;
     });
-    const result = viewSessions(placed, (session) => session.agent === "codex" ? !dead.has(session.id) : claudeInteractive(session, procs));
+    const result = viewSessions(placed, (session) => session.agent === "codex" ? !dead.has(session.id) && !codexInternal(session) : claudeInteractive(session, procs));
     current = new Map(result.live.map((session) => [session.id, session]));
     return result;
   }
@@ -2103,7 +2149,7 @@ async function serve(options) {
   let publishedJson = "";
   let server = null;
   const transcripts = new CodexTranscripts();
-  const flags = jsonFile(join8(home, "flags.json"));
+  const flags = jsonFile(join9(home, "flags.json"));
   const store = new FeedStore({
     sessions: sessions.view,
     screen,
@@ -2148,7 +2194,7 @@ async function serve(options) {
     clearTimeout(debounce);
     debounce = setTimeout(() => void refresh().catch((error) => log2(`refresh failed: ${error.message}`)), delay);
   }
-  const failuresFile = jsonFile(join8(home, "failures.json"));
+  const failuresFile = jsonFile(join9(home, "failures.json"));
   const failures = new FailureLog({ load: failuresFile.load, save: failuresFile.save, log: log2 });
   const sender = new ReplySender({
     terminalFor: async (id) => {
@@ -2314,8 +2360,8 @@ function log(message) {
   console.log(`${(/* @__PURE__ */ new Date()).toISOString()} ${message}`);
 }
 var DEFAULT_TARGETS = [
-  { agent: "claude", path: join9(homedir3(), ".claude", "settings.json") },
-  { agent: "codex", path: join9(homedir3(), ".codex", "hooks.json") }
+  { agent: "claude", path: join10(homedir4(), ".claude", "settings.json") },
+  { agent: "codex", path: join10(homedir4(), ".codex", "hooks.json") }
 ];
 function targetsFrom(args) {
   const named = [];
@@ -2351,8 +2397,8 @@ function report(results, targets) {
 }
 function shellFiles() {
   const shell = process.env.SHELL ?? "";
-  const zsh = join9(process.env.ZDOTDIR || homedir3(), ".zshrc");
-  const bash = join9(homedir3(), ".bashrc");
+  const zsh = join10(process.env.ZDOTDIR || homedir4(), ".zshrc");
+  const bash = join10(homedir4(), ".bashrc");
   return [...existsSync3(zsh) || shell.endsWith("zsh") ? [zsh] : [], ...existsSync3(bash) || shell.endsWith("bash") ? [bash] : []];
 }
 async function shellFunctions(add, dryRun) {

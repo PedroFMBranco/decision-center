@@ -1,7 +1,7 @@
 import { mkdirSync, watch } from 'node:fs'
 import { realpath } from 'node:fs/promises'
 import { join } from 'node:path'
-import { bindCodex, claudeInteractive, listProcesses, processCwds, type Binding } from './binding.ts'
+import { bindCodex, claudeInteractive, codexInternal, listProcesses, processCwds, type Binding } from './binding.ts'
 import { claudePrint } from './claude.ts'
 import type { ActionResponse, ApiError, FeedSnapshot, OpenRequest, ReplyRequest, SuggestRequest, SuggestResponse } from './contract.ts'
 import { FailureLog } from './failures.ts'
@@ -57,7 +57,7 @@ function sessionSource(dir: string) {
       const binding = session.agent === 'codex' ? bindings.get(session.id) : undefined
       return binding ? { ...session, pane: binding.pane, pid: binding.pid } : session
     })
-    const result = viewSessions(placed, (session) => (session.agent === 'codex' ? !dead.has(session.id) : claudeInteractive(session, procs)))
+    const result = viewSessions(placed, (session) => (session.agent === 'codex' ? !dead.has(session.id) && !codexInternal(session) : claudeInteractive(session, procs)))
     current = new Map(result.live.map((session) => [session.id, session]))
     return result
   }
