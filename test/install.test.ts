@@ -25,7 +25,7 @@ const CLAUDE_SETTINGS = `${JSON.stringify(
   null,
   2
 )}\n`
-const CODEX_HOOKS = `${JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: ': orca-agent-hook-form=1; true', timeout: 10 }] }] } }, null, 1)}\n`
+const CODEX_HOOKS = `${JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: ': other-tool-hook-form=1; true', timeout: 10 }] }] } }, null, 1)}\n`
 
 function withDir(body: (dir: string) => Promise<void> | void): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'dc-install-'))
