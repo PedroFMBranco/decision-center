@@ -137,7 +137,12 @@ export async function terminalScreen(handle: string): Promise<TerminalScreen> {
     '--screen'
   ])
   if (result.terminal.source !== 'screen') {
-    throw new OrcaCliError('Orca could not render the pane to check it', 'screen_unavailable')
+    // Why: some live panes keep no screen in Orca, so every retry fails the
+    // same way (issue 0028).
+    throw new OrcaCliError(
+      "Orca has no screen for this pane, so the reply can't be checked; reply in the pane",
+      'screen_unavailable'
+    )
   }
   return { lines: result.terminal.tail ?? [], draft: result.terminal.draft || null }
 }

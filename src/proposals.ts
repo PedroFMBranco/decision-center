@@ -9,6 +9,9 @@ const NEXT_LINE = /(?:^\s*(?:[-*]\s+)?|[.!?]\s+)[*_]{0,2}next(?:\s+steps?)?[*_]{
 // A top-level numbered item. Indented ones belong to the item above.
 const NUMBERED = /^(\d{1,2})[.)]\s+(.*)$/
 const FENCE = /^\s*(```|~~~)/
+// A quoted reply: `reply "fix repos"`, and the alternatives after it (`or "skip"`).
+const QUOTED = /["“]([^"“”]+)["”]/g
+const REPLY_CUE = /(?:\b(?:reply|say|type|answer|send)(?:\s+with)?|\bor|,)\s*$/i
 
 /** Drops markdown emphasis and collapses whitespace; keeps `code`. */
 function clean(text: string): string {
@@ -18,6 +21,20 @@ function clean(text: string): string {
     .trim()
 }
 
+/**
+ * The quoted replies in a `Next:` line, so the chip sends `fix repos` and not
+ * the whole `reply "fix repos" and I'll…` sentence.
+ */
+function quotedReplies(text: string): string[] {
+  const replies: string[] = []
+  for (const match of text.matchAll(QUOTED)) {
+    if (REPLY_CUE.test(text.slice(0, match.index)) && match[1]!.trim()) {
+      replies.push(match[1]!.trim())
+    }
+  }
+  return replies
+}
+
 function nextLine(lines: string[]): string[] {
   // Why the last paragraph only: a `Next:` earlier in the message is usually
   // a step that already happened.
@@ -25,7 +42,8 @@ function nextLine(lines: string[]): string[] {
   for (const line of lines.slice(start).reverse()) {
     const text = clean(NEXT_LINE.exec(line)?.[1] ?? '')
     if (text) {
-      return [text]
+      const replies = quotedReplies(text)
+      return replies.length ? replies : [text]
     }
   }
   return []

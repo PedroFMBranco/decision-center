@@ -85,7 +85,10 @@ async function terminalScreen(handle) {
     "--screen"
   ]);
   if (result.terminal.source !== "screen") {
-    throw new OrcaCliError("Orca could not render the pane to check it", "screen_unavailable");
+    throw new OrcaCliError(
+      "Orca has no screen for this pane, so the reply can't be checked; reply in the pane",
+      "screen_unavailable"
+    );
   }
   return { lines: result.terminal.tail ?? [], draft: result.terminal.draft || null };
 }
@@ -207,15 +210,27 @@ var MAX_PROPOSALS = 3;
 var NEXT_LINE = /(?:^\s*(?:[-*]\s+)?|[.!?]\s+)[*_]{0,2}next(?:\s+steps?)?[*_]{0,2}\s*:\s*[*_]{0,2}\s*(.*)$/i;
 var NUMBERED = /^(\d{1,2})[.)]\s+(.*)$/;
 var FENCE = /^\s*(```|~~~)/;
+var QUOTED = /["“]([^"“”]+)["”]/g;
+var REPLY_CUE = /(?:\b(?:reply|say|type|answer|send)(?:\s+with)?|\bor|,)\s*$/i;
 function clean(text) {
   return text.replace(/(\*\*|__)(.+?)\1/g, "$2").replace(/\s+/g, " ").trim();
+}
+function quotedReplies(text) {
+  const replies = [];
+  for (const match of text.matchAll(QUOTED)) {
+    if (REPLY_CUE.test(text.slice(0, match.index)) && match[1].trim()) {
+      replies.push(match[1].trim());
+    }
+  }
+  return replies;
 }
 function nextLine(lines) {
   const start = lines.findLastIndex((line) => !line.trim()) + 1;
   for (const line of lines.slice(start).reverse()) {
     const text = clean(NEXT_LINE.exec(line)?.[1] ?? "");
     if (text) {
-      return [text];
+      const replies = quotedReplies(text);
+      return replies.length ? replies : [text];
     }
   }
   return [];
@@ -672,9 +687,13 @@ function checkOptions(rows, indexes, options) {
     }
   }
 }
-function checkNoDraft(screen) {
-  if (screen.draft?.trim()) {
-    refuse("terminal_rejected", `the pane has unsent text in its composer: "${screen.draft.trim().slice(0, 60)}"`);
+function checkNoDraft(screen, item) {
+  const draft = screen.draft?.trim();
+  if (draft && item.agent === "claude" && parseProposals(item.lastMessage).includes(draft)) {
+    return;
+  }
+  if (draft) {
+    refuse("terminal_rejected", `the pane has unsent text in its composer: "${draft.slice(0, 60)}"`);
   }
 }
 var ReplySender = class {
@@ -759,7 +778,7 @@ var ReplySender = class {
       if (request.reply.type === "permission") {
         await (item.agent === "claude" ? this.claudePermission(handle, item, request.reply) : this.codexPermission(handle, item, request.reply));
       } else if (item.kind === "finished") {
-        await this.message(handle, request.reply);
+        await this.message(handle, item, request.reply);
       } else if (item.agent === "claude") {
         await this.claudeQuestion(handle, item, request.reply);
       } else {
@@ -775,7 +794,7 @@ var ReplySender = class {
     }
   }
   /** A normal message into the composer. Both agents queue it if a turn is running (issue 0004). */
-  async message(handle, reply) {
+  async message(handle, item, reply) {
     if (reply.type !== "text") {
       refuse("bad_request", "this item has no options to pick; reply with text");
     }
@@ -783,7 +802,7 @@ var ReplySender = class {
     if (claudePickerFooter(screen.lines) >= 0 || codexPickerFooter(screen.lines) >= 0) {
       refuse("terminal_rejected", "the pane has a picker open; answer it there or wait for the feed to catch up");
     }
-    checkNoDraft(screen);
+    checkNoDraft(screen, item);
     const text = reply.text;
     try {
       await this.press(handle, { text, enter: true });
@@ -800,7 +819,7 @@ var ReplySender = class {
     const footer = claudePickerFooter(screen.lines);
     if (footer < 0) {
       if (reply.type === "text") {
-        await this.message(handle, reply);
+        await this.message(handle, item, reply);
         return;
       }
       refuse("terminal_rejected", "the question isn't open in the pane any more");
@@ -948,14 +967,14 @@ var ReplySender = class {
     if (!await this.screenUntil(handle, (lines) => codexPermissionFooter(lines) < 0)) {
       refuse("terminal_rejected", "the decision went through but the note didn't; type it in the pane");
     }
-    await this.message(handle, { type: "text", text: note });
+    await this.message(handle, item, { type: "text", text: note });
   }
   async codexQuestion(handle, item, reply) {
     if (reply.type === "answers" || reply.type === "permission") {
       refuse("bad_request", "Codex questions take one option or free text");
     }
     if (reply.type === "text") {
-      await this.message(handle, reply);
+      await this.message(handle, item, reply);
       return;
     }
     if (reply.indexes.length > 1) {

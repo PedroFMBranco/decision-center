@@ -1,5 +1,6 @@
 import type { ActionResponse, ApiErrorCode, FeedItem, FeedOption, FeedQuestion, ReplyFailure, ReplyRequest } from './contract.ts'
 import { OrcaCliError, type TerminalScreen } from './cli.ts'
+import { parseProposals } from './proposals.ts'
 
 // Keystrokes, verified live against Claude Code 2.1.283 and Codex 0.155.1
 // (issues 0004, 0012, 0015, 0021, 0022).
@@ -186,10 +187,19 @@ function checkOptions(rows: ScreenRow[], indexes: number[], options: FeedOption[
   }
 }
 
-/** Refuses when you've half-typed something in the pane, so a reply never merges with it. */
-function checkNoDraft(screen: TerminalScreen): void {
-  if (screen.draft?.trim()) {
-    refuse('terminal_rejected', `the pane has unsent text in its composer: "${screen.draft.trim().slice(0, 60)}"`)
+/**
+ * Refuses when you've half-typed something in the pane, so a reply never merges with it.
+ * Why a draft that is one of the agent's own proposed replies passes: Claude Code
+ * shows its predicted next prompt in the empty composer, and Orca reports it as a
+ * draft.
+ */
+function checkNoDraft(screen: TerminalScreen, item: FeedItem): void {
+  const draft = screen.draft?.trim()
+  if (draft && item.agent === 'claude' && parseProposals(item.lastMessage).includes(draft)) {
+    return
+  }
+  if (draft) {
+    refuse('terminal_rejected', `the pane has unsent text in its composer: "${draft.slice(0, 60)}"`)
   }
 }
 
@@ -287,7 +297,7 @@ export class ReplySender {
           ? this.claudePermission(handle, item, request.reply)
           : this.codexPermission(handle, item, request.reply))
       } else if (item.kind === 'finished') {
-        await this.message(handle, request.reply)
+        await this.message(handle, item, request.reply)
       } else if (item.agent === 'claude') {
         await this.claudeQuestion(handle, item, request.reply)
       } else {
@@ -304,7 +314,7 @@ export class ReplySender {
   }
 
   /** A normal message into the composer. Both agents queue it if a turn is running (issue 0004). */
-  private async message(handle: string, reply: ReplyRequest['reply']): Promise<void> {
+  private async message(handle: string, item: FeedItem, reply: ReplyRequest['reply']): Promise<void> {
     if (reply.type !== 'text') {
       refuse('bad_request', 'this item has no options to pick; reply with text')
     }
@@ -312,7 +322,7 @@ export class ReplySender {
     if (claudePickerFooter(screen.lines) >= 0 || codexPickerFooter(screen.lines) >= 0) {
       refuse('terminal_rejected', 'the pane has a picker open; answer it there or wait for the feed to catch up')
     }
-    checkNoDraft(screen)
+    checkNoDraft(screen, item)
     const text = reply.text
     try {
       await this.press(handle, { text, enter: true })
@@ -333,7 +343,7 @@ export class ReplySender {
       // Why: Orca can keep a pane `waiting` after the picker is cancelled.
       // Text still makes sense as a message; a digit would land as a typo.
       if (reply.type === 'text') {
-        await this.message(handle, reply)
+        await this.message(handle, item, reply)
         return
       }
       refuse('terminal_rejected', "the question isn't open in the pane any more")
@@ -495,7 +505,7 @@ export class ReplySender {
     if (!(await this.screenUntil(handle, (lines) => codexPermissionFooter(lines) < 0))) {
       refuse('terminal_rejected', "the decision went through but the note didn't; type it in the pane")
     }
-    await this.message(handle, { type: 'text', text: note })
+    await this.message(handle, item, { type: 'text', text: note })
   }
 
   private async codexQuestion(handle: string, item: FeedItem, reply: ReplyRequest['reply']): Promise<void> {
@@ -505,7 +515,7 @@ export class ReplySender {
     if (reply.type === 'text') {
       // Why: free text answers a Codex question as a normal message, even a
       // title-only one (issue 0012).
-      await this.message(handle, reply)
+      await this.message(handle, item, reply)
       return
     }
     if (reply.indexes.length > 1) {

@@ -146,6 +146,19 @@ test('free text never merges with text you half-typed in the pane', async () => 
   assert.deepEqual(sent, [])
 })
 
+test("Claude's predicted next prompt in the composer is not a draft", async () => {
+  // Why: Claude Code shows the reply it predicts in the empty composer, and Orca
+  // reports it as a draft (failure logged 2026-09-28).
+  const lastMessage = 'Next: reply "read NTFS dates" (about 1 minute) or "skip, wipe".'
+  const predicted = harness([CLAUDE_IDLE], { draft: 'read NTFS dates' })
+  assert.equal(code(await predicted.sender.send(item({ lastMessage }), text('nevermind. wipe them'))), 'ok')
+  assert.deepEqual(predicted.sent, ['"nevermind. wipe them"+enter'])
+  const typed = harness([CLAUDE_IDLE], { draft: 'read NTFS' })
+  assert.equal(code(await typed.sender.send(item({ lastMessage }), text('hi'))), 'terminal_rejected')
+  const codex = harness([CLAUDE_IDLE], { draft: 'read NTFS dates' })
+  assert.equal(code(await codex.sender.send(item({ agent: 'codex', lastMessage }), text('hi'))), 'terminal_rejected')
+})
+
 test('a blocked text+Enter is retried as two sends', async () => {
   const { sender, sent } = harness([CLAUDE_IDLE], { failFirstSend: 'agent_prompt_blocked' })
   assert.equal(code(await sender.send(item({}), text('hi'))), 'ok')

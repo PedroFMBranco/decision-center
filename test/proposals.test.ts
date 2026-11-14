@@ -14,6 +14,19 @@ test('a Next: line in the last paragraph is the proposal', () => {
   assert.deepEqual(parseProposals('The context: next is unclear.'), [])
 })
 
+test('a Next: line that quotes replies proposes the quoted replies', () => {
+  assert.deepEqual(
+    parseProposals(`Next: reply "fix repos" and I'll switch Proxmox to the free no-subscription repo (about 5 minutes).`),
+    ['fix repos']
+  )
+  assert.deepEqual(parseProposals('Next: reply "read NTFS dates" (about 1 minute) or "skip, wipe".'), [
+    'read NTFS dates',
+    'skip, wipe'
+  ])
+  assert.deepEqual(parseProposals('Next: say “ship it”, or “wait”.'), ['ship it', 'wait'])
+  assert.deepEqual(parseProposals('Next: rename "foo.ts" to "bar.ts".'), ['rename "foo.ts" to "bar.ts".'])
+})
+
 test('a Next: line earlier in the message does not count', () => {
   assert.deepEqual(parseProposals('Next: build it.\n\nI built it and it works.'), [])
 })
