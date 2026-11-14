@@ -46,6 +46,20 @@ export async function listProcesses(): Promise<Proc[]> {
   })
 }
 
+/**
+ * Whether a Claude session still runs in a terminal. Claude's hook names its
+ * process. A process that started after the session did is a reused pid. One
+ * with no terminal is a headless run (`claude -p`, an SDK agent), which nobody
+ * can reply to, so it stays out of the feed.
+ */
+export function claudeInteractive(session: Session, procs: Proc[] | null): boolean {
+  if (!procs || session.pid === null) {
+    return true
+  }
+  const proc = procs.find((candidate) => candidate.pid === session.pid)
+  return !!proc && proc.startedAt <= session.startedAt && proc.tty !== null
+}
+
 /** The working folder of each pid that still runs. */
 export async function processCwds(pids: number[]): Promise<Map<number, string>> {
   const cwds = new Map<number, string>()

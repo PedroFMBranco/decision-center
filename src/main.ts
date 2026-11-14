@@ -1,7 +1,7 @@
 import { mkdirSync, watch } from 'node:fs'
 import { realpath } from 'node:fs/promises'
 import { join } from 'node:path'
-import { bindCodex, listProcesses, processCwds, type Binding, type Proc } from './binding.ts'
+import { bindCodex, claudeInteractive, listProcesses, processCwds, type Binding } from './binding.ts'
 import { claudePrint } from './claude.ts'
 import type { ActionResponse, ApiError, FeedSnapshot, OpenRequest, ReplyRequest, SuggestRequest, SuggestResponse } from './contract.ts'
 import { FailureLog } from './failures.ts'
@@ -24,15 +24,6 @@ const POLL_MS = 30_000
 const EVENT_DEBOUNCE_MS = 300
 const PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000
 const SUGGEST_MODEL = 'haiku'
-
-/** Claude's hook names its process; a process that started after the session's first event is a reused pid. */
-function claudeAlive(session: Session, procs: Proc[] | null): boolean {
-  if (!procs || session.pid === null) {
-    return true
-  }
-  const proc = procs.find((candidate) => candidate.pid === session.pid)
-  return !!proc && proc.startedAt <= session.startedAt
-}
 
 /** Reads the hook's session files and works out which sessions run, and where. */
 function sessionSource(dir: string) {
@@ -66,7 +57,7 @@ function sessionSource(dir: string) {
       const binding = session.agent === 'codex' ? bindings.get(session.id) : undefined
       return binding ? { ...session, pane: binding.pane, pid: binding.pid } : session
     })
-    const result = viewSessions(placed, (session) => (session.agent === 'codex' ? !dead.has(session.id) : claudeAlive(session, procs)))
+    const result = viewSessions(placed, (session) => (session.agent === 'codex' ? !dead.has(session.id) : claudeInteractive(session, procs)))
     current = new Map(result.live.map((session) => [session.id, session]))
     return result
   }

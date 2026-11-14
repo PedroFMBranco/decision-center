@@ -306,6 +306,13 @@ async function listProcesses() {
     }];
   });
 }
+function claudeInteractive(session, procs) {
+  if (!procs || session.pid === null) {
+    return true;
+  }
+  const proc = procs.find((candidate) => candidate.pid === session.pid);
+  return !!proc && proc.startedAt <= session.startedAt && proc.tty !== null;
+}
 async function processCwds(pids) {
   const cwds = /* @__PURE__ */ new Map();
   if (!pids.length) {
@@ -1949,13 +1956,6 @@ var POLL_MS = 3e4;
 var EVENT_DEBOUNCE_MS = 300;
 var PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1e3;
 var SUGGEST_MODEL = "haiku";
-function claudeAlive(session, procs) {
-  if (!procs || session.pid === null) {
-    return true;
-  }
-  const proc = procs.find((candidate) => candidate.pid === session.pid);
-  return !!proc && proc.startedAt <= session.startedAt;
-}
 function sessionSource(dir) {
   const log2 = new SessionLog(dir);
   let bindings = /* @__PURE__ */ new Map();
@@ -1985,7 +1985,7 @@ function sessionSource(dir) {
       const binding = session.agent === "codex" ? bindings.get(session.id) : void 0;
       return binding ? { ...session, pane: binding.pane, pid: binding.pid } : session;
     });
-    const result = viewSessions(placed, (session) => session.agent === "codex" ? !dead.has(session.id) : claudeAlive(session, procs));
+    const result = viewSessions(placed, (session) => session.agent === "codex" ? !dead.has(session.id) : claudeInteractive(session, procs));
     current = new Map(result.live.map((session) => [session.id, session]));
     return result;
   }

@@ -1,7 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { realpathSync } from 'node:fs'
-import { bindCodex, listProcesses, processCwds, type Binding, type CodexProc } from '../src/binding.ts'
+import { bindCodex, claudeInteractive, listProcesses, processCwds, type Binding, type CodexProc } from '../src/binding.ts'
+import { session as fixtureSession } from './fixtures.ts'
 import { reduce, type Session } from '../src/session.ts'
 import type { TmuxPane } from '../src/tmux.ts'
 
@@ -73,4 +74,14 @@ test('listProcesses and processCwds read this process', async () => {
   const self = (await listProcesses()).find((p) => p.pid === process.pid)
   assert.ok(self && self.startedAt <= Date.now() && self.startedAt > Date.now() - 600_000)
   assert.equal((await processCwds([process.pid])).get(process.pid), realpathSync(process.cwd()))
+})
+
+test('a Claude session is live while its process runs in a terminal; headless runs and reused pids are not', () => {
+  const claude = fixtureSession({ pid: 500, startedAt: 10_000 })
+  const proc = { pid: 500, tty: '/dev/ttys001', startedAt: 9_000, name: 'claude' }
+  assert.equal(claudeInteractive(claude, [proc]), true)
+  assert.equal(claudeInteractive(claude, [{ ...proc, tty: null }]), false)
+  assert.equal(claudeInteractive(claude, [{ ...proc, startedAt: 11_000 }]), false)
+  assert.equal(claudeInteractive(claude, []), false)
+  assert.equal(claudeInteractive(claude, null), true)
 })
