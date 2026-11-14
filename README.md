@@ -85,7 +85,7 @@ The server listens on `127.0.0.1` only. Set `DECISION_CENTER_PORT` to use anothe
 ## Limits
 
 - Headless Claude runs (`claude -p`, SDK agents) have no terminal, so they never show in the feed. A `codex exec` run started from a terminal does show, as its own item.
-- Denying or cancelling an ask in the pane, or pressing `Esc` on a question, fires no hook. In tmux, the feed reads the pane's screen and drops the ask once the prompt is gone, within 30 s. The session then shows nothing until its next turn ends. Outside tmux, the ask stays in the feed until the session's next hook.
+- Denying or cancelling an ask in the pane, or pressing `Esc` on a question, fires no hook. In tmux, the feed reads the pane's screen and drops the ask once the prompt is gone, within 30 s. When the pane says the turn was interrupted, the session then shows as finished, so you can tell the agent what to do instead. Outside tmux, the ask stays in the feed until the session's next hook.
 - A Codex hook runs in a shared background process, so it can't say which pane its session is in. Decision Center finds the pane from the `codex` process on the pane's terminal that runs in the session's folder. With two Codex sessions in one folder it can't always tell them apart, and then the session shows as if it ran outside tmux.
 - A Codex session counts as closed once no `codex` process with a terminal runs in its folder. Codex ends sessions without a hook, so a closed Codex session leaves the feed only on the next refresh, within 30 s.
 - With Claude Code's `auto` permission mode, permission asks never appear, so the feed shows none.
