@@ -1772,6 +1772,7 @@ import { execFile as execFile3 } from "node:child_process";
 import { readdirSync, realpathSync, statSync } from "node:fs";
 import { join as join7 } from "node:path";
 var TIMEOUT_MS = 5e3;
+var ENTER_AFTER_TEXT_MS = 500;
 function tmux(socket, args) {
   return new Promise((resolve, reject) => {
     execFile3("tmux", ["-S", socket, ...args], { timeout: TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
@@ -1913,6 +1914,9 @@ async function send(pane, input) {
       args.push(...args.length ? [";"] : [], "send-keys", "-t", pane.id, "-H", ...Array(semicolons).fill("3b"));
     }
     await tmux(pane.socket, args);
+    if (input.enter) {
+      await new Promise((done) => setTimeout(done, ENTER_AFTER_TEXT_MS));
+    }
   }
   if (input.enter) {
     await tmux(pane.socket, ["send-keys", "-t", pane.id, "Enter"]);

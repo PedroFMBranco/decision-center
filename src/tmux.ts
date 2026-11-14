@@ -13,6 +13,7 @@ export interface TmuxPane extends PaneRef {
 }
 
 const TIMEOUT_MS = 5000
+const ENTER_AFTER_TEXT_MS = 500
 
 /** Every call names its server, so panes on several tmux servers all work. */
 function tmux(socket: string, args: string[]): Promise<string> {
@@ -203,6 +204,10 @@ export async function send(pane: PaneRef, input: { text?: string; enter?: boolea
       args.push(...(args.length ? [';'] : []), 'send-keys', '-t', pane.id, '-H', ...Array(semicolons).fill('3b'))
     }
     await tmux(pane.socket, args)
+    if (input.enter) {
+      // Why: Codex reads Enter right behind typed text as part of a paste, and leaves it unsent.
+      await new Promise((done) => setTimeout(done, ENTER_AFTER_TEXT_MS))
+    }
   }
   if (input.enter) {
     await tmux(pane.socket, ['send-keys', '-t', pane.id, 'Enter'])
