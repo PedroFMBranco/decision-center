@@ -153,13 +153,20 @@ var HOOK_EVENTS = {
 var TIMEOUT_S = 10;
 var MARKER = "# decision-center hook";
 var quote = (text2) => `'${text2.replace(/'/g, `'\\''`)}'`;
+var NODE_FALLBACKS = ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"];
 function hookCommand(node, hookPath, agent) {
-  return `${quote(node)} ${quote(hookPath)} ${agent} ${MARKER}`;
+  const candidates = [quote(node), '"$(command -v node)"', ...NODE_FALLBACKS].join(" ");
+  return `for n in ${candidates}; do [ -x "$n" ] && exec "$n" ${quote(hookPath)} ${agent}; done; exit 0 ${MARKER}`;
 }
+var QUOTED = `'((?:[^']|'\\\\'')*)'`;
+var COMMAND_SHAPES = [new RegExp(`^for n in ${QUOTED} .* exec "\\$n" ${QUOTED} `), new RegExp(`^${QUOTED} ${QUOTED} `)];
 function parseHookCommand(command) {
-  const match = /^'((?:[^']|'\\'')*)' '((?:[^']|'\\'')*)' /.exec(command);
   const plain = (text2) => text2.replace(/'\\''/g, "'");
-  return match ? { node: plain(match[1]), hookPath: plain(match[2]) } : null;
+  for (const shape of COMMAND_SHAPES) {
+    const match = shape.exec(command);
+    if (match) return { node: plain(match[1]), hookPath: plain(match[2]) };
+  }
+  return null;
 }
 var HOOK_FILE = "hook.mjs";
 async function placeHook(builtHook, home) {
@@ -313,12 +320,12 @@ function hookProblems(text2, builtHook) {
   for (const command of commands) {
     const parsed = parseHookCommand(command);
     if (!parsed) {
-      problems.add("the hook command has an unknown shape");
+      problems.add("The hook command has an unknown shape");
       continue;
     }
-    if (!existsSync(parsed.node)) problems.add(`node is gone from ${parsed.node}`);
-    if (!existsSync(parsed.hookPath)) problems.add(`the hook file is gone from ${parsed.hookPath}`);
-    else if (built && !readFileSync(parsed.hookPath).equals(built)) problems.add(`the hook file at ${parsed.hookPath} differs from this build`);
+    if (!existsSync(parsed.node)) problems.add(`Node is gone from ${parsed.node}, so the hook runs with another node if it finds one`);
+    if (!existsSync(parsed.hookPath)) problems.add(`Not recording: the hook file is gone from ${parsed.hookPath}`);
+    else if (built && !readFileSync(parsed.hookPath).equals(built)) problems.add(`The hook file at ${parsed.hookPath} is from another build`);
   }
   return [...problems];
 }
@@ -579,14 +586,14 @@ var MAX_PROPOSALS = 3;
 var NEXT_LINE = /(?:^\s*(?:[-*]\s+)?|[.!?]\s+)[*_]{0,2}next(?:\s+steps?)?[*_]{0,2}\s*:\s*[*_]{0,2}\s*(.*)$/i;
 var NUMBERED = /^(\d{1,2})[.)]\s+(.*)$/;
 var FENCE = /^\s*(```|~~~)/;
-var QUOTED = /["“]([^"“”]+)["”]/g;
+var QUOTED2 = /["“]([^"“”]+)["”]/g;
 var REPLY_CUE = /(?:\b(?:reply|say|type|answer|send)(?:\s+with)?|\bor|,)\s*$/i;
 function clean(text2) {
   return text2.replace(/(\*\*|__)(.+?)\1/g, "$2").replace(/\s+/g, " ").trim();
 }
 function quotedReplies(text2) {
   const replies = [];
-  for (const match of text2.matchAll(QUOTED)) {
+  for (const match of text2.matchAll(QUOTED2)) {
     if (REPLY_CUE.test(text2.slice(0, match.index)) && match[1].trim()) {
       replies.push(match[1].trim());
     }
@@ -2460,7 +2467,7 @@ async function status() {
     const missing = HOOK_EVENTS[agent].filter((event) => !events.includes(event));
     console.log(`${AGENT_NAME[agent]} hooks: ${!events.length ? "not installed" : missing.length ? `partly installed, missing ${missing.join(", ")}` : "installed"} (${path})`);
     for (const problem of hookProblems(text2, BUILT_HOOK)) {
-      console.log(`  Not recording: ${problem}. Run install again.`);
+      console.log(`  ${problem}. Run install again.`);
     }
   }
   const withFunctions = shellFiles().filter((path) => existsSync3(path) && hasShellBlock(readFileSync2(path, "utf8")));

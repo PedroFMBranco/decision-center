@@ -15,19 +15,31 @@ const MARKER = '# decision-center hook'
 
 const quote = (text: string) => `'${text.replace(/'/g, `'\\''`)}'`
 
+/** Where node often lives, tried after the recorded path and `node` on PATH. */
+const NODE_FALLBACKS = ['/opt/homebrew/bin/node', '/usr/local/bin/node', '/usr/bin/node']
+
 /**
- * One simple command, so the shell execs node and the hook's parent is the
- * agent. The trailing comment marks it as ours wherever the folder lives.
+ * Runs the hook with the node recorded at install, else with another one, so
+ * a Node upgrade doesn't stop the hooks. Why exec: the hook's parent stays the
+ * agent, which is how a Claude session's process is known. The trailing
+ * comment marks the command as ours wherever the folder lives.
  */
 export function hookCommand(node: string, hookPath: string, agent: AgentType): string {
-  return `${quote(node)} ${quote(hookPath)} ${agent} ${MARKER}`
+  const candidates = [quote(node), '"$(command -v node)"', ...NODE_FALLBACKS].join(' ')
+  return `for n in ${candidates}; do [ -x "$n" ] && exec "$n" ${quote(hookPath)} ${agent}; done; exit 0 ${MARKER}`
 }
+
+const QUOTED = `'((?:[^']|'\\\\'')*)'`
+const COMMAND_SHAPES = [new RegExp(`^for n in ${QUOTED} .* exec "\\$n" ${QUOTED} `), new RegExp(`^${QUOTED} ${QUOTED} `)]
 
 /** The node and hook paths in one of our commands, or null when it has another shape. */
 export function parseHookCommand(command: string): { node: string; hookPath: string } | null {
-  const match = /^'((?:[^']|'\\'')*)' '((?:[^']|'\\'')*)' /.exec(command)
   const plain = (text: string) => text.replace(/'\\''/g, "'")
-  return match ? { node: plain(match[1]!), hookPath: plain(match[2]!) } : null
+  for (const shape of COMMAND_SHAPES) {
+    const match = shape.exec(command)
+    if (match) return { node: plain(match[1]!), hookPath: plain(match[2]!) }
+  }
+  return null
 }
 
 const HOOK_FILE = 'hook.mjs'
@@ -232,12 +244,12 @@ export function hookProblems(text: string | null, builtHook: string): string[] {
   for (const command of commands) {
     const parsed = parseHookCommand(command)
     if (!parsed) {
-      problems.add('the hook command has an unknown shape')
+      problems.add('The hook command has an unknown shape')
       continue
     }
-    if (!existsSync(parsed.node)) problems.add(`node is gone from ${parsed.node}`)
-    if (!existsSync(parsed.hookPath)) problems.add(`the hook file is gone from ${parsed.hookPath}`)
-    else if (built && !readFileSync(parsed.hookPath).equals(built)) problems.add(`the hook file at ${parsed.hookPath} differs from this build`)
+    if (!existsSync(parsed.node)) problems.add(`Node is gone from ${parsed.node}, so the hook runs with another node if it finds one`)
+    if (!existsSync(parsed.hookPath)) problems.add(`Not recording: the hook file is gone from ${parsed.hookPath}`)
+    else if (built && !readFileSync(parsed.hookPath).equals(built)) problems.add(`The hook file at ${parsed.hookPath} is from another build`)
   }
   return [...problems]
 }

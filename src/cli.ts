@@ -156,7 +156,7 @@ async function status(): Promise<void> {
     const missing = HOOK_EVENTS[agent].filter((event) => !events.includes(event))
     console.log(`${AGENT_NAME[agent]} hooks: ${!events.length ? 'not installed' : missing.length ? `partly installed, missing ${missing.join(', ')}` : 'installed'} (${path})`)
     for (const problem of hookProblems(text, BUILT_HOOK)) {
-      console.log(`  Not recording: ${problem}. Run install again.`)
+      console.log(`  ${problem}. Run install again.`)
     }
   }
   const withFunctions = shellFiles().filter((path) => existsSync(path) && hasShellBlock(readFileSync(path, 'utf8')))

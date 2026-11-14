@@ -25,7 +25,7 @@ Agent hooks report what each session is doing. tmux is how replies reach a sessi
    This adds one entry per hook event to `~/.claude/settings.json` and `~/.codex/hooks.json`. Every other entry stays where it is. Each file is backed up beside itself before it changes, as `<file>.decision-center-backup-<time>`. Running `install` again changes nothing. Pass `--claude-settings <path>` or `--codex-hooks <path>` to touch only the file you name.
 3. Codex asks you to trust new or changed hooks the next time it starts. Accept the prompt. Untrusted hooks don't run, and the feed then sees no Codex sessions.
 
-`install` copies the hook to `~/.decision-center/hook.mjs`, and the hook command is the absolute path of your `node` plus that copy. You can move or rename this folder afterwards. Run `install` again after an update, or after you change Node versions. `decision-center status` says so when the hook stopped recording. `node dist/decision-center.mjs uninstall` removes the entries and leaves the rest of each file alone.
+`install` copies the hook to `~/.decision-center/hook.mjs`, and the hook command is the absolute path of your `node` plus that copy. You can move or rename this folder afterwards. The hook runs with the `node` recorded at install. When that one is gone, after a Node upgrade for example, it uses `node` from `PATH`, then `/opt/homebrew/bin/node`, `/usr/local/bin/node` or `/usr/bin/node`. Run `install` again after an update. `decision-center status` says so when the recorded node or the hook file is gone. `node dist/decision-center.mjs uninstall` removes the entries and leaves the rest of each file alone.
 
 To type `decision-center` instead, add an alias such as `alias decision-center='node ~/src/decision-center/dist/decision-center.mjs'`.
 

@@ -163,9 +163,9 @@ test('the installed hook is a copy in the home folder that records without the c
     })
     assert.deepEqual([run.status, run.stdout], [0, ''])
     assert.equal(existsSync(join(dir, '.decision-center', 'sessions', 'claude-abc.jsonl')), true)
-    assert.doesNotMatch(cli('status').stdout, /Not recording/)
+    assert.doesNotMatch(cli('status').stdout, /Run install again/)
     writeFileSync(copy, 'older build')
-    assert.match(cli('status').stdout, /Not recording: the hook file at .*hook\.mjs differs from this build\. Run install again\./)
+    assert.match(cli('status').stdout, /The hook file at .*hook\.mjs is from another build\. Run install again\./)
     rmSync(copy)
     assert.match(cli('status').stdout, /Not recording: the hook file is gone from .*hook\.mjs\. Run install again\./)
     assert.equal(cli('install').status, 0)
@@ -176,6 +176,7 @@ test('the installed hook is a copy in the home folder that records without the c
 
 test('a hook command gives back the paths it was built from', () => {
   assert.deepEqual(parseHookCommand(command('claude')), { node: '/usr/bin/node', hookPath: "/code/it's here/dist/hook.mjs" })
+  assert.deepEqual(parseHookCommand("'/usr/bin/node' '/code/it'\\''s here/dist/hook.mjs' claude # decision-center hook"), { node: '/usr/bin/node', hookPath: "/code/it's here/dist/hook.mjs" })
   assert.equal(parseHookCommand('decision-center hook claude'), null)
 })
 
@@ -241,4 +242,27 @@ test('install edits a shell file only with --alias, and uninstall takes the func
     assert.equal(cli('uninstall').status, 0)
     assert.equal(readFileSync(rc, 'utf8'), 'export A=1\n')
     assert.match(cli('status').stdout, /Shell functions: not installed/)
+  }))
+
+test('the hook still records when the node recorded at install is gone', () =>
+  withDir((dir) => {
+    const hook = join(dir, 'hook.mjs')
+    writeFileSync(hook, readFileSync(new URL('../dist/hook.mjs', import.meta.url)))
+    const bin = join(dir, 'bin')
+    mkdirSync(bin)
+    symlinkSync(process.execPath, join(bin, 'node'))
+    const run = spawnSync('/bin/sh', ['-c', hookCommand(join(dir, 'gone', 'node'), hook, 'claude')], {
+      input: JSON.stringify({ session_id: 'found', cwd: '/c', hook_event_name: 'Stop', last_assistant_message: 'ok' }),
+      env: { DECISION_CENTER_HOME: join(dir, 'home'), PATH: `${bin}:/usr/bin:/bin` },
+      encoding: 'utf8'
+    })
+    assert.deepEqual([run.status, run.stdout, existsSync(join(dir, 'home', 'sessions', 'claude-found.jsonl'))], [0, '', true])
+  }))
+
+test('node replaces the shell that ran the hook command, so the hook stays the agent\'s child', () =>
+  withDir((dir) => {
+    const probe = join(dir, 'probe.mjs')
+    writeFileSync(probe, 'console.log(process.pid)\n')
+    const run = spawnSync('/bin/sh', ['-c', hookCommand(process.execPath, probe, 'claude')], { encoding: 'utf8' })
+    assert.equal(run.stdout.trim(), String(run.pid))
   }))
