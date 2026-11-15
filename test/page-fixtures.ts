@@ -100,6 +100,11 @@ export function fixtureItems(now = Date.now()): FeedItem[] {
       proposals: ['Run the same comparison on the staging bucket', 'Open the PR for review']
     }, now),
     item({
+      id: 'done-replies', kind: 'finished', project: 'web-app', title: 'failing tests', since: now - 12 * MIN,
+      lastMessage: 'The upgrade changed 14 packages. Three tests fail, all in the date helpers.',
+      proposals: ['Run the tests and show me the first failure', 'Diff the lockfile and list the version bumps', 'Pin the upgraded package back and confirm tests pass']
+    }, now),
+    item({
       id: 'done-suggest', kind: 'finished', agent: 'codex', project: 'billing-api', title: 'API contracts', since: now - 41 * MIN,
       lastMessage: 'The contracts are finished on branch `api-contracts`, and `scripts/ci.sh` passes with every gate.',
       canSuggest: true

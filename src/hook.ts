@@ -4,6 +4,7 @@ import { closeSync, mkdirSync, openSync, writeSync } from 'node:fs'
 import { join } from 'node:path'
 import { sessionFileName, toEvent, type HookEvent } from './events.ts'
 import { homeDir, sessionsDir } from './home.ts'
+import { sessionStartText } from './reply-line.ts'
 
 const STDIN_LIMIT_MS = 3000
 
@@ -27,7 +28,10 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString('utf8')
 }
 
-/** Records one hook call, then exits 0 with nothing on stdout, whatever happened. */
+/**
+ * Records one hook call, then exits 0, whatever happened. It prints nothing,
+ * except the reply-line rule when an interactive Claude session starts.
+ */
 export function runHook(agent: string | undefined): void {
   setTimeout(() => process.exit(0), STDIN_LIMIT_MS).unref()
   const record = async () => {
@@ -35,8 +39,14 @@ export function runHook(agent: string | undefined): void {
       return
     }
     const event = toEvent(agent, JSON.parse(await readStdin()), { env: process.env, ppid: process.ppid, now: Date.now() })
-    if (event) {
-      appendEvent(homeDir(), event)
+    if (!event) {
+      return
+    }
+    appendEvent(homeDir(), event)
+    const text = sessionStartText(agent, event.event, process.env)
+    if (text) {
+      // Why writeSync: the process exits right after, and an async write could be cut off.
+      writeSync(1, text)
     }
   }
   record()

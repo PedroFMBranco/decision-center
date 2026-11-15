@@ -109,7 +109,17 @@ A finished item shows the session's last message and a reply box. What you send 
 
 #### Quick replies
 
-If the last message ends with a `Next:` line or a numbered list, its first 3 items become reply chips. Clicking a chip fills the text box. It doesn't send.
+Reply chips come from the end of the session's last message. Clicking a chip fills the text box. It doesn't send.
+
+The hook gives each interactive Claude Code session one rule when it starts: end a turn with a line of likely replies, in this form.
+
+```
+Replies: "Run the tests again" | "Open the PR" | "Show me the diff first"
+```
+
+The feed turns that line into up to 3 chips and leaves it out of the message it shows. The line still shows in the session's own terminal. To switch the rule off, start the session with `DECISION_CENTER_REPLY_LINE=off` in its environment.
+
+Without that line, the feed reads the message itself: if it ends with a `Next:` line or a numbered list, the first 3 items become chips.
 
 A `Next:` line becomes a chip only when it reads as something you could send back. A line that quotes a reply, such as `Next: say "tag"`, gives the quoted text. A line that tells you what to do, such as `Next: tell me which branch to use`, gives no chip.
 
@@ -181,7 +191,7 @@ The home folder is `~/.decision-center`, or `$DECISION_CENTER_HOME`. The folder 
 - `flags.json`: which items you read or dismissed.
 - `failures.json`: the last 50 failed replies.
 
-The hook runs on every hook call of every session. It reads the payload, appends one line, and exits 0 with nothing on stdout, whatever happens. It makes no network calls and starts no processes. It takes about 25 ms per call, the median of 35 runs of `node dist/hook.mjs` on an Apple Silicon Mac, not counting the shell the agent starts it from. About 20 ms of that is Node starting up.
+The hook runs on every hook call of every session. It reads the payload, appends one line, and exits 0, whatever happens. It prints nothing, with one exception: when an interactive Claude Code session starts, it prints the reply-line rule from [Quick replies](#quick-replies), and Claude Code adds that text to the session's context. It makes no network calls and starts no processes. It takes about 25 ms per call, the median of 35 runs of `node dist/hook.mjs` on an Apple Silicon Mac, not counting the shell the agent starts it from. About 20 ms of that is Node starting up.
 
 The server runs these programs:
 
@@ -199,6 +209,8 @@ The server listens on `127.0.0.1` only. Set `DECISION_CENTER_PORT` to use anothe
 - Codex starts sessions of its own in `~/.codex/memories` to write its memories. They stay out of the feed.
 - A Codex hook runs in a shared background process, so it can't say which pane its session is in. Decision Center finds the pane from the `codex` process on the pane's terminal that runs in the session's folder. With two Codex sessions in one folder it can't always tell them apart, and then the session shows as if it ran outside tmux.
 - A Codex session counts as closed once no `codex` process with a terminal runs in its folder. Codex ends sessions without a hook, so a closed Codex session leaves the feed only on the next refresh, within 30 s.
+- The reply-line rule reaches interactive Claude Code sessions only. A scripted run (`claude -p`, an SDK agent) never gets it, because a program reads its output. Codex does pass hook text to the model, but a Codex hook can't tell the terminal UI from a scripted `codex exec` run, so Codex sessions don't get the rule. Their chips come from `Next:` lines and numbered lists.
+- The rule is an instruction, so an agent can skip it, mostly late in a long session. The feed then reads the message as before.
 - With Claude Code's `auto` permission mode, permission asks never appear, so the feed shows none.
 
 ## Develop

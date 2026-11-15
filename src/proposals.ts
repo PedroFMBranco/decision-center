@@ -24,6 +24,9 @@ function addressedToYou(text: string): boolean {
   return ASKS_YOU.test(text) || THEN_ASKS_YOU.test(text) || YOU_OR_ME.test(text)
 }
 
+// The line the hook asks the agent to end with: `Replies: "a" | "b" | "c"`.
+const REPLIES_LINE = /^\s*(?:[-*]\s+)?[*_`]{0,2}replies[*_`]{0,2}\s*:[*_`]{0,2}\s*(.+)$/i
+
 /** Drops markdown emphasis and collapses whitespace; keeps `code`. */
 function clean(text: string): string {
   return text
@@ -44,6 +47,31 @@ function quotedReplies(text: string): string[] {
     }
   }
   return replies
+}
+
+/** The replies in a closing `Replies:` line and where that line is, or null when the message has none. */
+function repliesLine(lines: string[]): { replies: string[]; at: number } | null {
+  // Why the last line only: the rule puts it there, and "Replies:" mid-message is prose.
+  const at = lines.findLastIndex((line) => line.trim())
+  const body = at < 0 ? null : REPLIES_LINE.exec(lines[at]!)?.[1]
+  if (!body) {
+    return null
+  }
+  const quoted = [...body.matchAll(QUOTED)].map((match) => match[1]!)
+  const replies = (quoted.length ? quoted : body.split('|'))
+    .map((reply) => clean(reply).replace(/^[`'‘]+|[`'’]+$/g, '').trim())
+    .filter(Boolean)
+  return replies.length ? { replies, at } : null
+}
+
+/** The message without its closing `Replies:` line: the feed shows those as buttons. */
+export function withoutRepliesLine(message: string | null): string | null {
+  if (message === null) {
+    return null
+  }
+  const lines = message.trimEnd().split('\n')
+  const found = repliesLine(lines)
+  return found ? lines.slice(0, found.at).join('\n').trimEnd() : message
 }
 
 /** The replies a `Next:` line gives, and where that line is, or null when there is none. */
@@ -104,6 +132,10 @@ function closingList(lines: string[]): string[] {
 /** Next actions the agent already wrote at the end of its message (issue 0009). */
 export function parseProposals(message: string | null | undefined): string[] {
   const lines = (message ?? '').trimEnd().split('\n')
+  const asked = repliesLine(lines)
+  if (asked) {
+    return asked.replies.slice(0, MAX_PROPOSALS)
+  }
   const next = nextLine(lines)
   if (next?.replies.length) {
     return next.replies.slice(0, MAX_PROPOSALS)

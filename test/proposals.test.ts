@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseProposals, parseSuggestion, Suggester, suggestInput } from '../src/proposals.ts'
+import { parseProposals, parseSuggestion, Suggester, suggestInput, withoutRepliesLine } from '../src/proposals.ts'
 
 test('a Next: line in the last paragraph is the proposal', () => {
   assert.deepEqual(parseProposals('Done.\n\n1. Fixed it\n2. Tested it\n\nNext: send the table to the mobile team.'), [
@@ -104,4 +104,20 @@ test('a Next: line that tells you what to do gives no proposal', () => {
     'run the same comparison on staging, or open the PR for review.'
   ])
   assert.deepEqual(parseProposals('1. Keep it\n2. Drop it\n\nNext: tell me which one.'), ['Keep it', 'Drop it'])
+})
+
+test('a closing Replies: line gives the replies and wins over Next: and a list', () => {
+  const message = 'Tagged.\n\n1. One\n2. Two\n\nNext: open the repo page.\nReplies: "Tag 0.3.0 and push it" | "Show me the diff first" | "Skip the tag" | "Fourth"'
+  assert.deepEqual(parseProposals(message), ['Tag 0.3.0 and push it', 'Show me the diff first', 'Skip the tag'])
+  assert.equal(withoutRepliesLine(message), 'Tagged.\n\n1. One\n2. Two\n\nNext: open the repo page.')
+  assert.deepEqual(parseProposals('Done.\n**Replies:** “Run the tests” | “Open the PR”\n'), ['Run the tests', 'Open the PR'])
+  assert.deepEqual(parseProposals('Done.\nReplies: `run it` | open the PR'), ['run it', 'open the PR'])
+})
+
+test('Replies: anywhere but the last line is prose', () => {
+  const message = 'Replies: "a" | "b"\n\nThat line above is how it looks.'
+  assert.deepEqual(parseProposals(message), [])
+  assert.equal(withoutRepliesLine(message), message)
+  assert.equal(withoutRepliesLine('Replies:'), 'Replies:')
+  assert.equal(withoutRepliesLine(null), null)
 })

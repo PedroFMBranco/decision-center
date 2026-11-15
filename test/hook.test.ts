@@ -60,3 +60,22 @@ test('garbage, an unknown agent or an unsafe session id exits 0 and writes nothi
     assert.deepEqual(readdirSync(home), [])
   })
 })
+
+test('the hook prints the reply-line rule only when an interactive Claude session starts', () => {
+  withHome((home) => {
+    const start = (agent: string, env: Record<string, string>, event = 'SessionStart') =>
+      runHook(home, agent, JSON.stringify({ session_id: 'abc123', hook_event_name: event, cwd: '/code/app', source: 'startup' }), env).stdout
+    assert.match(start('claude', { CLAUDE_CODE_ENTRYPOINT: 'cli' }), /^Decision Center shows this session[\s\S]*Replies: "first reply"/)
+    for (const [agent, env, event] of [
+      ['claude', { CLAUDE_CODE_ENTRYPOINT: 'sdk-cli' }, 'SessionStart'],
+      ['claude', {}, 'SessionStart'],
+      ['claude', { CLAUDE_CODE_ENTRYPOINT: 'cli', DECISION_CENTER_REPLY_LINE: 'off' }, 'SessionStart'],
+      ['claude', { CLAUDE_CODE_ENTRYPOINT: 'cli' }, 'UserPromptSubmit'],
+      ['claude', { CLAUDE_CODE_ENTRYPOINT: 'cli' }, 'Stop'],
+      ['codex', { CLAUDE_CODE_ENTRYPOINT: 'cli' }, 'SessionStart']
+    ] as const) {
+      assert.equal(start(agent, env, event), '', `${agent} ${event} ${JSON.stringify(env)}`)
+    }
+    assert.equal(readdirSync(join(home, 'sessions')).length, 2)
+  })
+})

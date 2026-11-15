@@ -107,6 +107,27 @@ function homeDir(env = process.env) {
 }
 var sessionsDir = (home) => join(home, "sessions");
 
+// src/reply-line.ts
+var REPLY_LINE_INSTRUCTION = `Decision Center shows this session to the user in a feed, with buttons that send a reply in one click.
+When you end a turn and wait for the user, make the last line of your message a list of the replies the user is most likely to send next, in exactly this form:
+Replies: "first reply" | "second reply" | "third reply"
+Rules for that line:
+- Give 1 to 3 replies, the most likely first.
+- Write each reply as the user's own words to you, as an instruction you can act on without the rest of your message. "Tag 0.3.0 and push it", not "tag" and not "say tag to continue".
+- Keep each reply under 80 characters, with no double quotes inside it.
+- Put it after everything else, including any closing line you normally write. Do not mention it.
+- Leave the line out when you ask the user a question through a tool, or when no reply is more likely than any other.
+`;
+function sessionStartText(agent, event, env) {
+  if (event !== "SessionStart" || agent !== "claude") {
+    return null;
+  }
+  if (env.CLAUDE_CODE_ENTRYPOINT !== "cli" || env.DECISION_CENTER_REPLY_LINE === "off") {
+    return null;
+  }
+  return REPLY_LINE_INSTRUCTION;
+}
+
 // src/hook.ts
 var STDIN_LIMIT_MS = 3e3;
 function appendEvent(home, event) {
@@ -134,8 +155,13 @@ function runHook(agent) {
       return;
     }
     const event = toEvent(agent, JSON.parse(await readStdin()), { env: process.env, ppid: process.ppid, now: Date.now() });
-    if (event) {
-      appendEvent(homeDir(), event);
+    if (!event) {
+      return;
+    }
+    appendEvent(homeDir(), event);
+    const text2 = sessionStartText(agent, event.event, process.env);
+    if (text2) {
+      writeSync(1, text2);
     }
   };
   record().catch(() => void 0).finally(() => process.exit(0));
@@ -594,6 +620,7 @@ var YOU_OR_ME = /\b(?:you|your|yours|me|my|I|I'll|I'd|I've)\b/;
 function addressedToYou(text2) {
   return ASKS_YOU.test(text2) || THEN_ASKS_YOU.test(text2) || YOU_OR_ME.test(text2);
 }
+var REPLIES_LINE = /^\s*(?:[-*]\s+)?[*_`]{0,2}replies[*_`]{0,2}\s*:[*_`]{0,2}\s*(.+)$/i;
 function clean(text2) {
   return text2.replace(/(\*\*|__)(.+?)\1/g, "$2").replace(/\s+/g, " ").trim();
 }
@@ -605,6 +632,24 @@ function quotedReplies(text2) {
     }
   }
   return replies;
+}
+function repliesLine(lines) {
+  const at = lines.findLastIndex((line) => line.trim());
+  const body = at < 0 ? null : REPLIES_LINE.exec(lines[at])?.[1];
+  if (!body) {
+    return null;
+  }
+  const quoted = [...body.matchAll(QUOTED2)].map((match) => match[1]);
+  const replies = (quoted.length ? quoted : body.split("|")).map((reply) => clean(reply).replace(/^[`'‘]+|[`'’]+$/g, "").trim()).filter(Boolean);
+  return replies.length ? { replies, at } : null;
+}
+function withoutRepliesLine(message) {
+  if (message === null) {
+    return null;
+  }
+  const lines = message.trimEnd().split("\n");
+  const found = repliesLine(lines);
+  return found ? lines.slice(0, found.at).join("\n").trimEnd() : message;
 }
 function nextLine(lines) {
   const start = lines.findLastIndex((line) => !line.trim()) + 1;
@@ -652,6 +697,10 @@ function closingList(lines) {
 }
 function parseProposals(message) {
   const lines = (message ?? "").trimEnd().split("\n");
+  const asked = repliesLine(lines);
+  if (asked) {
+    return asked.replies.slice(0, MAX_PROPOSALS);
+  }
   const next = nextLine(lines);
   if (next?.replies.length) {
     return next.replies.slice(0, MAX_PROPOSALS);
@@ -749,7 +798,7 @@ function itemFromSession(session, context) {
     terminal: session.pane ? { kind: "tmux", pane: session.pane.id } : null,
     title: firstLine(session.prompt) || "Untitled session",
     prompt: session.prompt,
-    lastMessage,
+    lastMessage: finished ? withoutRepliesLine(lastMessage) : lastMessage,
     proposals,
     canSuggest: finished && !context.stopped && !proposals.length && !!lastMessage?.trim(),
     updatedAt: session.updatedAt,

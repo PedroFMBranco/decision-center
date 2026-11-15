@@ -1,6 +1,6 @@
 import type { FeedItem, FeedKind, FeedQuestion, FeedSnapshot } from './contract.ts'
 import { API_VERSION } from './contract.ts'
-import { parseProposals } from './proposals.ts'
+import { parseProposals, withoutRepliesLine } from './proposals.ts'
 import type { Ask, Session } from './session.ts'
 
 const GROUP_ORDER: Record<FeedKind, number> = { question: 0, permission: 0, finished: 1, closed: 2 }
@@ -73,7 +73,7 @@ export function itemFromSession(session: Session, context: SessionContext): Feed
     terminal: session.pane ? { kind: 'tmux', pane: session.pane.id } : null,
     title: firstLine(session.prompt) || 'Untitled session',
     prompt: session.prompt,
-    lastMessage,
+    lastMessage: finished ? withoutRepliesLine(lastMessage) : lastMessage,
     proposals,
     canSuggest: finished && !context.stopped && !proposals.length && !!lastMessage?.trim(),
     updatedAt: session.updatedAt,
