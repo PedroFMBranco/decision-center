@@ -14,26 +14,39 @@ Rules for that line:
 - Leave the line out when you ask the user a question through a tool, or when no reply is more likely than any other.
 `
 
+/** The name Codex's terminal UI gives itself in the first line of a session's transcript. */
+const CODEX_TERMINAL_UI = 'codex-tui'
+
 /**
  * What the hook prints for this call, or null for nothing.
  *
- * Why only an interactive Claude session: stdout of a SessionStart hook
- * becomes context for the model. A scripted run (`claude -p`, an SDK agent)
- * must not get the rule, because its output is read by a program. Claude Code
- * names the interactive CLI in `CLAUDE_CODE_ENTRYPOINT`; anything else gets
- * nothing. Codex gives a hook no way to tell its terminal UI from `codex exec`,
- * so Codex sessions get nothing.
+ * Why only an interactive session: stdout of a SessionStart hook becomes
+ * context for the model. A scripted run (`claude -p`, `codex exec`, an SDK
+ * agent) must not get the rule, because its output is read by a program.
+ * Claude Code names the interactive CLI in `CLAUDE_CODE_ENTRYPOINT`. Codex
+ * says nothing in the payload or the environment, so the caller reads the
+ * name of the program that started the session from its transcript. Anything
+ * but a known interactive program gets nothing.
  */
 export function sessionStartText(
   agent: AgentType,
   event: string,
-  env: { CLAUDE_CODE_ENTRYPOINT?: string; DECISION_CENTER_REPLY_LINE?: string }
+  env: { CLAUDE_CODE_ENTRYPOINT?: string; DECISION_CENTER_REPLY_LINE?: string },
+  codexOriginator: () => string | null
 ): string | null {
-  if (event !== 'SessionStart' || agent !== 'claude') {
+  if (event !== 'SessionStart' || env.DECISION_CENTER_REPLY_LINE === 'off') {
     return null
   }
-  if (env.CLAUDE_CODE_ENTRYPOINT !== 'cli' || env.DECISION_CENTER_REPLY_LINE === 'off') {
+  const interactive = agent === 'claude' ? env.CLAUDE_CODE_ENTRYPOINT === 'cli' : codexOriginator() === CODEX_TERMINAL_UI
+  return interactive ? REPLY_LINE_INSTRUCTION : null
+}
+
+/** The `originator` in a Codex transcript's first line, which Codex writes when the session is created. */
+export function originatorOf(firstLine: string): string | null {
+  try {
+    const originator = JSON.parse(firstLine)?.payload?.originator
+    return typeof originator === 'string' ? originator : null
+  } catch {
     return null
   }
-  return REPLY_LINE_INSTRUCTION
 }

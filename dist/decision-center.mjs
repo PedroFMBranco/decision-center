@@ -13,7 +13,7 @@ var DEFAULT_PORT = 47823;
 var STREAM_EVENT_FEED = "feed";
 
 // src/hook.ts
-import { closeSync, mkdirSync, openSync, writeSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, readSync, writeSync } from "node:fs";
 import { join as join2 } from "node:path";
 
 // src/events.ts
@@ -118,18 +118,26 @@ Rules for that line:
 - Put it after everything else, including any closing line you normally write. Do not mention it.
 - Leave the line out when you ask the user a question through a tool, or when no reply is more likely than any other.
 `;
-function sessionStartText(agent, event, env) {
-  if (event !== "SessionStart" || agent !== "claude") {
+var CODEX_TERMINAL_UI = "codex-tui";
+function sessionStartText(agent, event, env, codexOriginator) {
+  if (event !== "SessionStart" || env.DECISION_CENTER_REPLY_LINE === "off") {
     return null;
   }
-  if (env.CLAUDE_CODE_ENTRYPOINT !== "cli" || env.DECISION_CENTER_REPLY_LINE === "off") {
+  const interactive = agent === "claude" ? env.CLAUDE_CODE_ENTRYPOINT === "cli" : codexOriginator() === CODEX_TERMINAL_UI;
+  return interactive ? REPLY_LINE_INSTRUCTION : null;
+}
+function originatorOf(firstLine3) {
+  try {
+    const originator = JSON.parse(firstLine3)?.payload?.originator;
+    return typeof originator === "string" ? originator : null;
+  } catch {
     return null;
   }
-  return REPLY_LINE_INSTRUCTION;
 }
 
 // src/hook.ts
 var STDIN_LIMIT_MS = 3e3;
+var FIRST_LINE_LIMIT = 1024 * 1024;
 function appendEvent(home, event) {
   const dir = sessionsDir(home);
   mkdirSync(dir, { recursive: true, mode: 448 });
@@ -139,6 +147,34 @@ function appendEvent(home, event) {
 `);
   } finally {
     closeSync(fd);
+  }
+}
+function firstLine(path) {
+  if (!path) {
+    return null;
+  }
+  try {
+    const fd = openSync(path, "r");
+    try {
+      const buffer = Buffer.alloc(FIRST_LINE_LIMIT);
+      let length = 0;
+      while (length < buffer.length) {
+        const read = readSync(fd, buffer, length, buffer.length - length, null);
+        const end = buffer.subarray(length, length + read).indexOf(10);
+        if (end >= 0) {
+          return buffer.toString("utf8", 0, length + end);
+        }
+        if (read === 0) {
+          return null;
+        }
+        length += read;
+      }
+      return null;
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return null;
   }
 }
 async function readStdin() {
@@ -159,7 +195,7 @@ function runHook(agent) {
       return;
     }
     appendEvent(homeDir(), event);
-    const text2 = sessionStartText(agent, event.event, process.env);
+    const text2 = sessionStartText(agent, event.event, process.env, () => originatorOf(firstLine(event.transcriptPath) ?? ""));
     if (text2) {
       writeSync(1, text2);
     }
@@ -755,7 +791,7 @@ var Suggester = class {
 
 // src/feed.ts
 var GROUP_ORDER = { question: 0, permission: 0, finished: 1, closed: 2 };
-function firstLine(text2, max = 80) {
+function firstLine2(text2, max = 80) {
   const line = (text2 ?? "").trim().split("\n")[0] ?? "";
   return line.length > max ? `${line.slice(0, max - 1)}\u2026` : line;
 }
@@ -796,7 +832,7 @@ function itemFromSession(session, context) {
     project: basename3(session.cwd) || session.cwd,
     cwd: session.cwd,
     terminal: session.pane ? { kind: "tmux", pane: session.pane.id } : null,
-    title: firstLine(session.prompt) || "Untitled session",
+    title: firstLine2(session.prompt) || "Untitled session",
     prompt: session.prompt,
     lastMessage: withoutRepliesLine(lastMessage),
     proposals,

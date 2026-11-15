@@ -111,13 +111,13 @@ A finished item shows the session's last message and a reply box. What you send 
 
 Reply chips come from the end of the session's last message. Clicking a chip fills the text box. It doesn't send.
 
-The hook gives each interactive Claude Code session one rule when it starts: end a turn with a line of likely replies, in this form.
+The hook gives each interactive session one rule when it starts: end a turn with a line of likely replies, in this form. An interactive session is Claude Code in a terminal or the Codex terminal UI.
 
 ```
 Replies: "Run the tests again" | "Open the PR" | "Show me the diff first"
 ```
 
-The feed turns that line into up to 3 chips and leaves it out of the message it shows. The line still shows in the session's own terminal. To switch the rule off, start the session with `DECISION_CENTER_REPLY_LINE=off` in its environment.
+The feed turns that line into up to 3 chips and leaves it out of the message it shows. The line still shows in the session's own terminal. To switch the rule off for a Claude Code session, start it with `DECISION_CENTER_REPLY_LINE=off` in its environment. Codex has no switch for one session, see [Limits](#limits).
 
 Without that line, the feed reads the message itself: if it ends with a `Next:` line or a numbered list, the first 3 items become chips.
 
@@ -191,7 +191,7 @@ The home folder is `~/.decision-center`, or `$DECISION_CENTER_HOME`. The folder 
 - `flags.json`: which items you read or dismissed.
 - `failures.json`: the last 50 failed replies.
 
-The hook runs on every hook call of every session. It reads the payload, appends one line, and exits 0, whatever happens. It prints nothing, with one exception: when an interactive Claude Code session starts, it prints the reply-line rule from [Quick replies](#quick-replies), and Claude Code adds that text to the session's context. It makes no network calls and starts no processes. It takes about 25 ms per call, the median of 35 runs of `node dist/hook.mjs` on an Apple Silicon Mac, not counting the shell the agent starts it from. About 20 ms of that is Node starting up.
+The hook runs on every hook call of every session. It reads the payload, appends one line, and exits 0, whatever happens. It prints nothing, with one exception: when an interactive session starts, it prints the reply-line rule from [Quick replies](#quick-replies), and the agent adds that text to the session's context. For Codex, it first reads the first line of the session's transcript to see which program started the session. It makes no network calls and starts no processes. It takes about 25 ms per call, the median of 35 runs of `node dist/hook.mjs` on an Apple Silicon Mac, not counting the shell the agent starts it from. About 20 ms of that is Node starting up.
 
 The server runs these programs:
 
@@ -209,7 +209,9 @@ The server listens on `127.0.0.1` only. Set `DECISION_CENTER_PORT` to use anothe
 - Codex starts sessions of its own in `~/.codex/memories` to write its memories. They stay out of the feed.
 - A Codex hook runs in a shared background process, so it can't say which pane its session is in. Decision Center finds the pane from the `codex` process on the pane's terminal that runs in the session's folder. With two Codex sessions in one folder it can't always tell them apart, and then the session shows as if it ran outside tmux.
 - A Codex session counts as closed once no `codex` process with a terminal runs in its folder. Codex ends sessions without a hook, so a closed Codex session leaves the feed only on the next refresh, within 30 s.
-- The reply-line rule reaches interactive Claude Code sessions only. A scripted run (`claude -p`, an SDK agent) never gets it, because a program reads its output. Codex does pass hook text to the model, but a Codex hook can't tell the terminal UI from a scripted `codex exec` run, so Codex sessions don't get the rule. Their chips come from `Next:` lines and numbered lists.
+- The reply-line rule reaches interactive sessions only. A scripted run (`claude -p`, `codex exec`, an SDK agent) never gets it, because a program reads its output. Claude Code marks its interactive CLI in the hook's environment. Codex doesn't, so the hook reads the transcript's first line and gives the rule only to a session that `codex-tui` started. The Codex desktop app and editor plugins get no rule.
+- Codex stores the rule in the session's history. A terminal session that a script later resumes with `codex exec resume` still carries it.
+- `DECISION_CENTER_REPLY_LINE=off` doesn't work per session in Codex. A Codex hook runs in a shared background process, so it never sees the environment of the terminal the session runs in. The switch works for all Codex sessions when that background process has it in its environment.
 - The rule is an instruction, so an agent can skip it, mostly late in a long session. The feed then reads the message as before.
 - With Claude Code's `auto` permission mode, permission asks never appear, so the feed shows none.
 

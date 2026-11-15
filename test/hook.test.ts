@@ -1,12 +1,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { CLAUDE } from './captured.ts'
 
 const HOOK = new URL('../dist/hook.mjs', import.meta.url).pathname
+const RULE = /^Decision Center shows this session[\s\S]*Replies: "first reply"/
 
 function runHook(home: string, agent: string, stdin: string, env: Record<string, string> = {}) {
   return spawnSync(process.execPath, [HOOK, agent], {
@@ -65,7 +66,7 @@ test('the hook prints the reply-line rule only when an interactive Claude sessio
   withHome((home) => {
     const start = (agent: string, env: Record<string, string>, event = 'SessionStart') =>
       runHook(home, agent, JSON.stringify({ session_id: 'abc123', hook_event_name: event, cwd: '/code/app', source: 'startup' }), env).stdout
-    assert.match(start('claude', { CLAUDE_CODE_ENTRYPOINT: 'cli' }), /^Decision Center shows this session[\s\S]*Replies: "first reply"/)
+    assert.match(start('claude', { CLAUDE_CODE_ENTRYPOINT: 'cli' }), RULE)
     for (const [agent, env, event] of [
       ['claude', { CLAUDE_CODE_ENTRYPOINT: 'sdk-cli' }, 'SessionStart'],
       ['claude', {}, 'SessionStart'],
@@ -77,5 +78,36 @@ test('the hook prints the reply-line rule only when an interactive Claude sessio
       assert.equal(start(agent, env, event), '', `${agent} ${event} ${JSON.stringify(env)}`)
     }
     assert.equal(readdirSync(join(home, 'sessions')).length, 2)
+  })
+})
+
+test('the hook prints the reply-line rule to a Codex session only when the terminal UI started it', () => {
+  withHome((home) => {
+    const meta = (originator: unknown) =>
+      `${JSON.stringify({ type: 'session_meta', payload: { originator, base_instructions: { text: 'x'.repeat(100_000) } } })}\n{"type":"turn"}\n`
+    const start = (transcript: string | null, env: Record<string, string> = {}, event = 'SessionStart') => {
+      const path = join(home, 'rollout.jsonl')
+      rmSync(path, { force: true })
+      if (transcript !== null) {
+        writeFileSync(path, transcript)
+      }
+      const body = { session_id: 'abc123', hook_event_name: event, cwd: '/code/app', source: 'startup', transcript_path: path }
+      return runHook(home, 'codex', JSON.stringify(body), env).stdout
+    }
+    assert.match(start(meta('codex-tui')), RULE)
+    for (const [why, transcript, env, event] of [
+      ['a scripted run', meta('codex_exec'), {}, 'SessionStart'],
+      ['the desktop app', meta('Codex Desktop'), {}, 'SessionStart'],
+      ['no originator', meta(null), {}, 'SessionStart'],
+      ['no transcript file', null, {}, 'SessionStart'],
+      ['a first line that is not JSON', 'codex-tui\n', {}, 'SessionStart'],
+      ['a first line with no end', meta('codex-tui').split('\n')[0]!, {}, 'SessionStart'],
+      ['switched off', meta('codex-tui'), { DECISION_CENTER_REPLY_LINE: 'off' }, 'SessionStart'],
+      ['another event', meta('codex-tui'), {}, 'UserPromptSubmit']
+    ] as const) {
+      assert.equal(start(transcript, env, event), '', why)
+    }
+    const noPath = { session_id: 'abc123', hook_event_name: 'SessionStart', cwd: '/code/app', source: 'startup', transcript_path: null }
+    assert.equal(runHook(home, 'codex', JSON.stringify(noPath)).stdout, '')
   })
 })
