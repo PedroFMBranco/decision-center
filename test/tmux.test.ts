@@ -44,6 +44,14 @@ test('a private tmux server: types literally, reads the screen, refuses copy mod
     execFileSync('tmux', ['-S', socket, 'new-session', '-d', '-x', '80', '-y', '10', 'cat -v'])
     const [pane] = await panes([socket])
     assert.ok(pane && /^%\d+$/.test(pane.id) && pane.tty.startsWith('/dev/'))
+    // A background service has no locale, and tmux then writes its formats differently.
+    const locale = Object.fromEntries(['LANG', 'LC_ALL', 'LC_CTYPE'].map((name) => [name, process.env[name]]))
+    try {
+      for (const name of Object.keys(locale)) delete process.env[name]
+      assert.deepEqual(await panes([socket]), [pane])
+    } finally {
+      for (const [name, value] of Object.entries(locale)) if (value !== undefined) process.env[name] = value
+    }
     await send(pane, { text: '-a; "b" \x1b[1;3A;', enter: true })
     await new Promise((done) => setTimeout(done, 300))
     assert.equal((await screen(pane)).lines[0], '-a; "b" ^[[1;3A;')

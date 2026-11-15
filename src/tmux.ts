@@ -15,10 +15,15 @@ export interface TmuxPane extends PaneRef {
 const TIMEOUT_MS = 5000
 const ENTER_AFTER_TEXT_MS = 500
 
-/** Every call names its server, so panes on several tmux servers all work. */
+/**
+ * Every call names its server, so panes on several tmux servers all work.
+ *
+ * Why `-u`: without a UTF-8 locale, as under launchd, tmux prints `_` in place
+ * of each tab in a format, and no line of the pane list splits.
+ */
 function tmux(socket: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile('tmux', ['-S', socket, ...args], { timeout: TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
+    execFile('tmux', ['-u', '-S', socket, ...args], { timeout: TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
       if (error) {
         reject(new TerminalError(`tmux: ${(stderr || error.message).trim()}`, 'cli_failed'))
         return

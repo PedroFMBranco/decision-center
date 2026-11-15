@@ -2043,7 +2043,7 @@ var TIMEOUT_MS = 5e3;
 var ENTER_AFTER_TEXT_MS = 500;
 function tmux(socket, args) {
   return new Promise((resolve, reject) => {
-    execFile3("tmux", ["-S", socket, ...args], { timeout: TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
+    execFile3("tmux", ["-u", "-S", socket, ...args], { timeout: TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
       if (error) {
         reject(new TerminalError(`tmux: ${(stderr || error.message).trim()}`, "cli_failed"));
         return;
