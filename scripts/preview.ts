@@ -50,7 +50,7 @@ const server = await startServer({
     console.log('suggest', request.id)
     // Why the delay: shows the loading state the real Haiku call has (~8 s).
     await new Promise((done) => setTimeout(done, 1500))
-    return { ok: true, proposals: ['Run the contract tests again', 'Open the PR for review', 'Explain the T0 changes'] }
+    return { ok: true, proposals: ['Run the contract tests again', 'Open the PR for review', 'Explain the contract changes'] }
   },
   failures: async () => ({ ok: true, failures }),
   async clearFailures() {

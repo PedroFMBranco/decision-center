@@ -1,16 +1,51 @@
 # Decision Center
 
-A feed of the Claude Code and Codex sessions on this machine that finished a turn, need permission, or asked a question. Pick an item to read the session's last message and reply to it from the browser. The reply is typed into the session's tmux pane.
+One page that lists every Claude Code and Codex session on this machine that waits on you, and lets you answer from the browser.
 
-Agent hooks report what each session is doing. tmux is how replies reach a session.
+![The feed on the left lists sessions that asked a question, need permission, or finished. The right side shows the selected question with its three options and a reply box.](docs/screenshots/feed.png)
+
+A session lands in the feed when it asks a question, needs permission, or finishes a turn. Pick an item to read the session's last message, then reply. The reply is typed into the session's tmux pane.
+
+- [Quick start](#quick-start)
+- [How it works](#how-it-works)
+- [Requirements](#requirements)
+- [Install](#install)
+- [Use](#use)
+- [Commands](#commands)
+- [What it stores and runs](#what-it-stores-and-runs)
+- [Limits](#limits)
+- [Develop](#develop)
+
+## Quick start
+
+```sh
+git clone git@github.com:PedroFMBranco/decision-center.git
+cd decision-center
+node dist/decision-center.mjs install     # add the hooks to Claude Code and Codex
+node dist/decision-center.mjs serve       # serve the feed on http://127.0.0.1:47823
+```
+
+In a second terminal, start an agent that the feed can reply to:
+
+```sh
+node dist/decision-center.mjs run claude  # or: run codex
+```
+
+Open `http://127.0.0.1:47823`. The session shows up when it next asks, needs permission, or finishes.
+
+## How it works
+
+- **Hooks report.** `install` adds a hook to Claude Code and to Codex. On each hook event, the hook appends one line to a file in `~/.decision-center`.
+- **The server reads.** `serve` turns those files into the feed and serves the page on `127.0.0.1`.
+- **tmux replies.** A reply is typed into the session's tmux pane, as if you typed it there. A session outside tmux still shows in the feed, but you can't reply to it from the page.
 
 ## Requirements
 
 - macOS or Linux.
 - Node 22 or later.
 - tmux 3.2 or later. Replies reach an agent that runs inside tmux. `decision-center run claude` starts it that way from any terminal.
-- Claude Code and/or Codex.
-- For **Suggest replies** only: Claude Code installed and logged in (see below).
+- Claude Code, Codex, or both.
+- For **Suggest replies** only: Claude Code installed and logged in. See [Quick replies](#quick-replies).
 
 ## Install
 
@@ -25,9 +60,19 @@ Agent hooks report what each session is doing. tmux is how replies reach a sessi
    This adds one entry per hook event to `~/.claude/settings.json` and `~/.codex/hooks.json`. Every other entry stays where it is. Each file is backed up beside itself before it changes, as `<file>.decision-center-backup-<time>`. Running `install` again changes nothing. Pass `--claude-settings <path>` or `--codex-hooks <path>` to touch only the file you name.
 3. Codex asks you to trust new or changed hooks the next time it starts. Accept the prompt. Untrusted hooks don't run, and the feed then sees no Codex sessions.
 
-`install` copies the hook to `~/.decision-center/hook.mjs`, and the hook command is the absolute path of your `node` plus that copy. You can move or rename this folder afterwards. The hook runs with the `node` recorded at install. When that one is gone, after a Node upgrade for example, it uses `node` from `PATH`, then `/opt/homebrew/bin/node`, `/usr/local/bin/node` or `/usr/bin/node`. Run `install` again after an update. `decision-center status` says so when the recorded node or the hook file is gone. `node dist/decision-center.mjs uninstall` removes the entries and leaves the rest of each file alone.
+To type `decision-center` instead of the full path, add an alias such as `alias decision-center='node ~/src/decision-center/dist/decision-center.mjs'`. The rest of this page uses that short form.
 
-To type `decision-center` instead, add an alias such as `alias decision-center='node ~/src/decision-center/dist/decision-center.mjs'`.
+### Move the folder or upgrade Node
+
+`install` copies the hook to `~/.decision-center/hook.mjs`, and the hook command is the absolute path of your `node` plus that copy. You can move or rename this folder afterwards.
+
+The hook runs with the `node` recorded at install. When that one is gone, after a Node upgrade for example, it uses `node` from `PATH`, then `/opt/homebrew/bin/node`, `/usr/local/bin/node` or `/usr/bin/node`.
+
+Run `install` again after an update. `decision-center status` says so when the recorded node or the hook file is gone.
+
+### Uninstall
+
+`decision-center uninstall` removes the entries and leaves the rest of each file alone.
 
 ## Use
 
@@ -38,13 +83,35 @@ To type `decision-center` instead, add an alias such as `alias decision-center='
 
 Press `?` for every shortcut. `⌘K` jumps to any item. **Open pane** (`o`) selects the session's tmux window and pane, and switches your tmux client to it.
 
-Permission asks get **Allow** (`1`) and **Deny** (`2`), with an optional note that goes to the agent with your answer. "Always allow" rules are set in the pane. A question with several parts shows one row of options per part: pick in each, then send them together.
+`decision-center status` shows the home folder, whether the hooks are installed, how many sessions it has seen, the tmux version and whether the server runs.
+
+### Answer a permission ask
+
+![A permission ask in dark mode. The command the agent wants to run is shown above an Allow and a Deny option, with a box for an optional note.](docs/screenshots/permission-dark.png)
+
+Permission asks get **Allow** (`1`) and **Deny** (`2`), with an optional note that goes to the agent with your answer. "Always allow" rules are set in the pane.
+
+### Answer a question
+
+A question shows its options as numbered rows. Press the digit, or type your own answer.
+
+![A question with three parts. Each part has its own row of options, and one button sends every answer together.](docs/screenshots/question-parts.png)
+
+A question with several parts shows one row of options per part: pick in each, then send them together.
 
 Some things are left to the pane itself, behind an **Open pane** button: Codex questions with several parts, parts with no options to pick, and typed answers to those questions.
 
-Before it types anything, Decision Center reads the pane's screen. It refuses to reply when the prompt it expects isn't there, when you have unsent text in the composer, or when the pane is in tmux copy mode.
+### Reply to a finished turn
 
-`decision-center status` shows the home folder, whether the hooks are installed, how many sessions it has seen, the tmux version and whether the server runs.
+![A finished turn. Two reply chips taken from the message sit above the reply box.](docs/screenshots/finished.png)
+
+A finished item shows the session's last message and a reply box. What you send becomes the session's next prompt.
+
+#### Quick replies
+
+If the last message ends with a `Next:` line or a numbered list, its first 3 items become reply chips. Clicking a chip fills the text box. It doesn't send.
+
+**Suggest replies** asks Claude Haiku for chips when the message has none. It runs your own `claude` CLI (`claude -p --model haiku`, with no settings, hooks, MCP servers, tools or saved session). It needs Claude Code installed and logged in, and each press costs about $0.005 on your Claude account. Without Claude Code, the button shows an error and everything else still works.
 
 ### Start an agent from any terminal
 
@@ -56,32 +123,53 @@ decision-center run claude          # or: decision-center run codex, with any ar
 
 The session runs on a tmux server of its own, named `decision-center`, so your own tmux and its settings are untouched. That server shows no status line and adds no `Esc` delay. Two things differ from a bare terminal:
 
-- The mouse wheel scrolls tmux's history. While you are scrolled up, the pane is in copy mode and the feed refuses to reply; press `q` to leave it.
+- The mouse wheel scrolls tmux's history. While you are scrolled up, the pane is in copy mode and the feed refuses to reply. Press `q` to leave it.
 - Dragging selects text through tmux. On macOS the selection is copied to the clipboard when you release the button. Hold `Option` (Terminal) or `Shift` (most others) while dragging for the terminal's own selection.
 
 Closing the terminal window ends the session.
 
 Only a call that opens a session goes through tmux. A piped call, a print or version flag (`claude -p`, `--version`, `--help`) and a subcommand (`claude mcp list`, `codex exec`) run as they are, so their output stays on screen.
 
-To make plain `claude` and `codex` start this way, run `decision-center install --alias`. It adds two shell functions, in a marked block, to `~/.zshrc` and to `~/.bashrc` when you have one, and backs each file up first. The functions run the agent as it is when Node or this folder is gone. `uninstall` removes the block. Without `--alias`, `install` edits no shell file.
+#### Make plain `claude` and `codex` start this way
+
+Run `decision-center install --alias`. It adds two shell functions, in a marked block, to `~/.zshrc` and to `~/.bashrc` when you have one, and backs each file up first. The functions run the agent as it is when Node or this folder is gone. `uninstall` removes the block. Without `--alias`, `install` edits no shell file.
 
 ### Sessions outside tmux
 
 Hooks fire in every terminal, so these sessions still show up in the feed. Replies and **Open pane** are refused with "this session is not running in tmux; reply in its terminal".
 
-### Failed replies
+### When a reply is refused
+
+Before it types anything, Decision Center reads the pane's screen. It refuses to reply when the prompt it expects isn't there, when you have unsent text in the composer, or when the pane is in tmux copy mode.
+
+![The failed-replies list. One entry shows the reply that was sent, the error, the keys typed, the unsent text in the pane, and the bottom of the pane's screen.](docs/screenshots/failed-replies.png)
 
 When a reply doesn't go through, the item shows **Not sent** with the reason. **Details** (or `!`) opens the failed-replies list, and a **Failed N** button in the header opens it too. Each entry shows what you sent, the error, the keys already typed into the pane, any unsent text in the pane's composer, and the bottom of the pane's screen at that moment. **Copy report** puts them all on the clipboard as JSON. The last 50 are kept in `failures.json` in the home folder and are never sent anywhere.
-
-### Quick replies
-
-If the last message ends with a `Next:` line or a numbered list, its first 3 items become reply chips. Clicking a chip fills the text box. It doesn't send.
-
-**Suggest replies** asks Claude Haiku for chips when the message has none. It runs your own `claude` CLI (`claude -p --model haiku`, with no settings, hooks, MCP servers, tools or saved session). It needs Claude Code installed and logged in, and each press costs about $0.005 on your Claude account. Without Claude Code, the button shows an error and everything else still works.
 
 ### Alerts
 
 Decision Center raises no banners or sounds of its own. The unread count shows in the feed and in the tab title, for example `(3) Decision Center`.
+
+### Appearance
+
+The page follows the system's light or dark mode. The `?` sheet has a **Theme** button to fix it to one, and a **Density** button for a more compact feed.
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `serve` | Runs the feed server in the foreground. It is the default command. |
+| `open` | Opens the feed in your browser. |
+| `run <agent> [args]` | Starts an agent inside tmux, from any terminal, so the feed can reply to it. |
+| `install [--dry-run] [--alias] [--claude-settings <path>] [--codex-hooks <path>]` | Adds the hooks to Claude Code and Codex. With `--alias`, also makes `claude` and `codex` start through `run`. |
+| `uninstall [--dry-run] [--claude-settings <path>] [--codex-hooks <path>]` | Removes the hooks again. |
+| `status` | Shows the home folder, hooks, sessions and tmux. |
+| `hook <claude\|codex>` | Records one hook call. Agents run this. |
+
+| Environment variable | Default | Meaning |
+|---|---|---|
+| `DECISION_CENTER_PORT` | `47823` | The port the server listens on. |
+| `DECISION_CENTER_HOME` | `~/.decision-center` | The home folder. |
 
 ## What it stores and runs
 
@@ -119,6 +207,8 @@ npm test          # typecheck, unit tests, bundle freshness
 npm run build     # rebuild dist/decision-center.mjs and dist/hook.mjs; commit them
 npm run preview   # serve the page against fixtures
 ```
+
+The screenshots in `docs/screenshots/` come from `npm run preview` at 1280 by 800, so they show fixture data and no real session.
 
 ## License
 
