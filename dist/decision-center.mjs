@@ -118,20 +118,19 @@ Rules for that line:
 - Put it after everything else, including any closing line you normally write. Do not mention it.
 - Leave the line out when you ask the user a question through a tool, or when no reply is more likely than any other.
 `;
-var CODEX_TERMINAL_UI = "codex-tui";
-function sessionStartText(agent, event, env, codexOriginator) {
+function sessionStartText(agent, event, env, codexTerminalUi) {
   if (event !== "SessionStart" || env.DECISION_CENTER_REPLY_LINE === "off") {
     return null;
   }
-  const interactive = agent === "claude" ? env.CLAUDE_CODE_ENTRYPOINT === "cli" : codexOriginator() === CODEX_TERMINAL_UI;
+  const interactive = agent === "claude" ? env.CLAUDE_CODE_ENTRYPOINT === "cli" : codexTerminalUi();
   return interactive ? REPLY_LINE_INSTRUCTION : null;
 }
-function originatorOf(firstLine3) {
+function startedInCodexTerminalUi(firstLine3) {
   try {
-    const originator = JSON.parse(firstLine3)?.payload?.originator;
-    return typeof originator === "string" ? originator : null;
+    const meta = JSON.parse(firstLine3)?.payload;
+    return meta?.originator === "codex-tui" && meta?.thread_source === "user";
   } catch {
-    return null;
+    return false;
   }
 }
 
@@ -195,7 +194,7 @@ function runHook(agent) {
       return;
     }
     appendEvent(homeDir(), event);
-    const text2 = sessionStartText(agent, event.event, process.env, () => originatorOf(firstLine(event.transcriptPath) ?? ""));
+    const text2 = sessionStartText(agent, event.event, process.env, () => startedInCodexTerminalUi(firstLine(event.transcriptPath) ?? ""));
     if (text2) {
       writeSync(1, text2);
     }

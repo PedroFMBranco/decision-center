@@ -83,8 +83,8 @@ test('the hook prints the reply-line rule only when an interactive Claude sessio
 
 test('the hook prints the reply-line rule to a Codex session only when the terminal UI started it', () => {
   withHome((home) => {
-    const meta = (originator: unknown) =>
-      `${JSON.stringify({ type: 'session_meta', payload: { originator, base_instructions: { text: 'x'.repeat(100_000) } } })}\n{"type":"turn"}\n`
+    const meta = (originator: unknown, thread_source: unknown = 'user') =>
+      `${JSON.stringify({ type: 'session_meta', payload: { originator, thread_source, base_instructions: { text: 'x'.repeat(100_000) } } })}\n{"type":"turn"}\n`
     const start = (transcript: string | null, env: Record<string, string> = {}, event = 'SessionStart') => {
       const path = join(home, 'rollout.jsonl')
       rmSync(path, { force: true })
@@ -99,6 +99,8 @@ test('the hook prints the reply-line rule to a Codex session only when the termi
       ['a scripted run', meta('codex_exec'), {}, 'SessionStart'],
       ['the desktop app', meta('Codex Desktop'), {}, 'SessionStart'],
       ['no originator', meta(null), {}, 'SessionStart'],
+      ['a thread the terminal UI started for itself', meta('codex-tui', 'guardian_review'), {}, 'SessionStart'],
+      ['no thread source', meta('codex-tui', null), {}, 'SessionStart'],
       ['no transcript file', null, {}, 'SessionStart'],
       ['a first line that is not JSON', 'codex-tui\n', {}, 'SessionStart'],
       ['a first line with no end', meta('codex-tui').split('\n')[0]!, {}, 'SessionStart'],

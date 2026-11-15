@@ -4,7 +4,7 @@ import { closeSync, mkdirSync, openSync, readSync, writeSync } from 'node:fs'
 import { join } from 'node:path'
 import { sessionFileName, toEvent, type HookEvent } from './events.ts'
 import { homeDir, sessionsDir } from './home.ts'
-import { originatorOf, sessionStartText } from './reply-line.ts'
+import { sessionStartText, startedInCodexTerminalUi } from './reply-line.ts'
 
 const STDIN_LIMIT_MS = 3000
 // Why this size: the first line of a Codex transcript holds the session's base instructions, about 22 kB in Codex 0.169.
@@ -75,7 +75,7 @@ export function runHook(agent: string | undefined): void {
       return
     }
     appendEvent(homeDir(), event)
-    const text = sessionStartText(agent, event.event, process.env, () => originatorOf(firstLine(event.transcriptPath) ?? ''))
+    const text = sessionStartText(agent, event.event, process.env, () => startedInCodexTerminalUi(firstLine(event.transcriptPath) ?? ''))
     if (text) {
       // Why writeSync: the process exits right after, and an async write could be cut off.
       writeSync(1, text)
