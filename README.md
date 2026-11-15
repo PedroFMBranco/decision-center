@@ -230,7 +230,7 @@ npm run build     # rebuild dist/decision-center.mjs and dist/hook.mjs; commit t
 npm run preview   # serve the page against fixtures
 ```
 
-The screenshots in `docs/screenshots/` come from `npm run preview` at 1280 by 800, so they show fixture data and no real session. `docs/demo.gif` and `docs/social-preview.png` come from the same preview.
+The screenshots in `docs/screenshots/` come from `npm run preview` at 1280 by 800, so they show fixture data and no real session. `docs/demo.gif` comes from the same preview. `docs/social-preview.png` is a title card around one preview screenshot.
 
 GitHub Actions runs `npm test` on every push to `main` and on every pull request, on Linux with tmux installed.
 
