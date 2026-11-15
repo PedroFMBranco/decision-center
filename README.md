@@ -1,8 +1,12 @@
 # Decision Center
 
+[![test](https://github.com/PedroFMBranco/decision-center/actions/workflows/test.yml/badge.svg)](https://github.com/PedroFMBranco/decision-center/actions/workflows/test.yml)
+
 One page that lists every Claude Code and Codex session on this machine that waits on you, and lets you answer from the browser.
 
-![The feed on the left lists sessions that asked a question, need permission, or finished. The right side shows the selected question with its three options and a reply box.](docs/screenshots/feed.png)
+![A finished session is picked from the feed, one of its three reply buttons fills the reply box, and the reply is sent. Then a permission ask is allowed with one click. Each answered item leaves the feed.](docs/demo.gif)
+
+An agent that asks a question or needs permission stops until you answer. With several sessions in several terminals, an ask can wait a long time before you see it. Decision Center puts every waiting session in one list, so you answer each one without looking for its terminal.
 
 A session lands in the feed when it asks a question, needs permission, or finishes a turn. Pick an item to read the session's last message, then reply. The reply is typed into the session's tmux pane.
 
@@ -75,6 +79,8 @@ Run `install` again after an update. `decision-center status` says so when the r
 `decision-center uninstall` removes the entries and leaves the rest of each file alone.
 
 ## Use
+
+![The feed on the left lists sessions that asked a question, need permission, or finished. The right side shows the selected question with its three options and a reply box.](docs/screenshots/feed.png)
 
 1. Run `decision-center serve` in a terminal. It serves the feed on `http://127.0.0.1:47823` and runs until you stop it with `Ctrl-C`. Nothing starts it for you.
 2. Run `decision-center open`, or open that address yourself.
@@ -224,7 +230,9 @@ npm run build     # rebuild dist/decision-center.mjs and dist/hook.mjs; commit t
 npm run preview   # serve the page against fixtures
 ```
 
-The screenshots in `docs/screenshots/` come from `npm run preview` at 1280 by 800, so they show fixture data and no real session.
+The screenshots in `docs/screenshots/` come from `npm run preview` at 1280 by 800, so they show fixture data and no real session. `docs/demo.gif` and `docs/social-preview.png` come from the same preview.
+
+GitHub Actions runs `npm test` on every push to `main` and on every pull request, on Linux with tmux installed.
 
 ## License
 
