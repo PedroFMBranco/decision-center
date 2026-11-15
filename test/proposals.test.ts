@@ -6,8 +6,8 @@ test('a Next: line in the last paragraph is the proposal', () => {
   assert.deepEqual(parseProposals('Done.\n\n1. Fixed it\n2. Tested it\n\nNext: send the table to the mobile team.'), [
     'send the table to the mobile team.'
   ])
-  assert.deepEqual(parseProposals('Merged.\n**Next:** run `npm test` and paste the failure.'), [
-    'run `npm test` and paste the failure.'
+  assert.deepEqual(parseProposals('Merged.\n**Next:** run `npm test` on the release branch.'), [
+    'run `npm test` on the release branch.'
   ])
   assert.deepEqual(parseProposals('Next steps: open the PR'), ['open the PR'])
   assert.deepEqual(parseProposals('The build passed. Next: open the PR'), ['open the PR'])
@@ -84,4 +84,24 @@ test('asks once per key and retries after a failure', async () => {
   assert.deepEqual(await suggester.suggest('a@1', item), ['Ship it'])
   await suggester.suggest('a@2', item)
   assert.equal(inputs.length, 3)
+})
+
+test('a Next: line that tells you what to do gives no proposal', () => {
+  // Why: these read as the agent talking to you, so they make no sense as your reply (reported 2026-11-15).
+  for (const line of [
+    'Next: type the task in one line, for example "check Komodo for mx".',
+    'Next: tell me which branch to use.',
+    'Next: open the page and tell me what still looks off.',
+    'Next: run `npm test` and paste the first failing line.',
+    'Next: pick one of the two options above.',
+    "Next: restart the server, then I'll check the log.",
+    'Next: check that your terminal shows the new prompt.'
+  ]) {
+    assert.deepEqual(parseProposals(line), [], line)
+  }
+  assert.deepEqual(parseProposals('Next: say "tag" if you want 0.3.0 tagged.'), ['tag'])
+  assert.deepEqual(parseProposals('Next: run the same comparison on staging, or open the PR for review.'), [
+    'run the same comparison on staging, or open the PR for review.'
+  ])
+  assert.deepEqual(parseProposals('1. Keep it\n2. Drop it\n\nNext: tell me which one.'), ['Keep it', 'Drop it'])
 })

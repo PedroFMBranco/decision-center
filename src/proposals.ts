@@ -13,6 +13,17 @@ const FENCE = /^\s*(```|~~~)/
 const QUOTED = /["“]([^"“”]+)["”]/g
 const REPLY_CUE = /(?:\b(?:reply|say|type|answer|send)(?:\s+with)?|\bor|,)\s*$/i
 
+// A `Next:` line the agent wrote to you, not for you: it opens with a verb that
+// asks you to speak ("type the task", "tell me"), chains one ("and paste the
+// line"), or talks about you or itself. Sent back as a reply it makes no sense.
+const ASKS_YOU = /^(?:type|tell|say|reply|answer|paste|describe|pick|choose|decide|confirm|share|let me know|give me|send me)\b/i
+const THEN_ASKS_YOU = /\b(?:and|then)\s+(?:type|tell|say|reply|answer|paste|describe|pick|choose|decide|confirm)\b/i
+const YOU_OR_ME = /\b(?:you|your|yours|me|my|I|I'll|I'd|I've)\b/
+
+function addressedToYou(text: string): boolean {
+  return ASKS_YOU.test(text) || THEN_ASKS_YOU.test(text) || YOU_OR_ME.test(text)
+}
+
 /** Drops markdown emphasis and collapses whitespace; keeps `code`. */
 function clean(text: string): string {
   return text
@@ -35,18 +46,19 @@ function quotedReplies(text: string): string[] {
   return replies
 }
 
-function nextLine(lines: string[]): string[] {
+/** The replies a `Next:` line gives, and where that line is, or null when there is none. */
+function nextLine(lines: string[]): { replies: string[]; at: number } | null {
   // Why the last paragraph only: a `Next:` earlier in the message is usually
   // a step that already happened.
   const start = lines.findLastIndex((line) => !line.trim()) + 1
-  for (const line of lines.slice(start).reverse()) {
-    const text = clean(NEXT_LINE.exec(line)?.[1] ?? '')
+  for (let at = lines.length - 1; at >= start; at--) {
+    const text = clean(NEXT_LINE.exec(lines[at]!)?.[1] ?? '')
     if (text) {
       const replies = quotedReplies(text)
-      return replies.length ? replies : [text]
+      return { replies: replies.length || addressedToYou(text) ? replies : [text], at }
     }
   }
-  return []
+  return null
 }
 
 /**
@@ -92,8 +104,13 @@ function closingList(lines: string[]): string[] {
 /** Next actions the agent already wrote at the end of its message (issue 0009). */
 export function parseProposals(message: string | null | undefined): string[] {
   const lines = (message ?? '').trimEnd().split('\n')
-  const found = nextLine(lines)
-  return (found.length ? found : closingList(lines)).slice(0, MAX_PROPOSALS)
+  const next = nextLine(lines)
+  if (next?.replies.length) {
+    return next.replies.slice(0, MAX_PROPOSALS)
+  }
+  // Why drop the line: a `Next:` line that only asks you to answer ("tell me
+  // which one") must not hide the numbered list above it.
+  return closingList(next ? lines.filter((_, at) => at !== next.at) : lines).slice(0, MAX_PROPOSALS)
 }
 
 // The tail of a long message carries the ending; the model needs no more.

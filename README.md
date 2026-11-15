@@ -111,6 +111,8 @@ A finished item shows the session's last message and a reply box. What you send 
 
 If the last message ends with a `Next:` line or a numbered list, its first 3 items become reply chips. Clicking a chip fills the text box. It doesn't send.
 
+A `Next:` line becomes a chip only when it reads as something you could send back. A line that quotes a reply, such as `Next: say "tag"`, gives the quoted text. A line that tells you what to do, such as `Next: tell me which branch to use`, gives no chip.
+
 **Suggest replies** asks Claude Haiku for chips when the message has none. It runs your own `claude` CLI (`claude -p --model haiku`, with no settings, hooks, MCP servers, tools or saved session). It needs Claude Code installed and logged in, and each press costs about $0.005 on your Claude account. Without Claude Code, the button shows an error and everything else still works.
 
 ### Start an agent from any terminal

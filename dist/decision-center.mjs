@@ -588,6 +588,12 @@ var NUMBERED = /^(\d{1,2})[.)]\s+(.*)$/;
 var FENCE = /^\s*(```|~~~)/;
 var QUOTED2 = /["“]([^"“”]+)["”]/g;
 var REPLY_CUE = /(?:\b(?:reply|say|type|answer|send)(?:\s+with)?|\bor|,)\s*$/i;
+var ASKS_YOU = /^(?:type|tell|say|reply|answer|paste|describe|pick|choose|decide|confirm|share|let me know|give me|send me)\b/i;
+var THEN_ASKS_YOU = /\b(?:and|then)\s+(?:type|tell|say|reply|answer|paste|describe|pick|choose|decide|confirm)\b/i;
+var YOU_OR_ME = /\b(?:you|your|yours|me|my|I|I'll|I'd|I've)\b/;
+function addressedToYou(text2) {
+  return ASKS_YOU.test(text2) || THEN_ASKS_YOU.test(text2) || YOU_OR_ME.test(text2);
+}
 function clean(text2) {
   return text2.replace(/(\*\*|__)(.+?)\1/g, "$2").replace(/\s+/g, " ").trim();
 }
@@ -602,14 +608,14 @@ function quotedReplies(text2) {
 }
 function nextLine(lines) {
   const start = lines.findLastIndex((line) => !line.trim()) + 1;
-  for (const line of lines.slice(start).reverse()) {
-    const text2 = clean(NEXT_LINE.exec(line)?.[1] ?? "");
+  for (let at = lines.length - 1; at >= start; at--) {
+    const text2 = clean(NEXT_LINE.exec(lines[at])?.[1] ?? "");
     if (text2) {
       const replies = quotedReplies(text2);
-      return replies.length ? replies : [text2];
+      return { replies: replies.length || addressedToYou(text2) ? replies : [text2], at };
     }
   }
-  return [];
+  return null;
 }
 function closingList(lines) {
   let list = null;
@@ -646,8 +652,11 @@ function closingList(lines) {
 }
 function parseProposals(message) {
   const lines = (message ?? "").trimEnd().split("\n");
-  const found = nextLine(lines);
-  return (found.length ? found : closingList(lines)).slice(0, MAX_PROPOSALS);
+  const next = nextLine(lines);
+  if (next?.replies.length) {
+    return next.replies.slice(0, MAX_PROPOSALS);
+  }
+  return closingList(next ? lines.filter((_, at) => at !== next.at) : lines).slice(0, MAX_PROPOSALS);
 }
 var MESSAGE_TAIL_CHARS = 8e3;
 var PROMPT_HEAD_CHARS = 1e3;
