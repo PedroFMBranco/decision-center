@@ -798,7 +798,7 @@ function itemFromSession(session, context) {
     terminal: session.pane ? { kind: "tmux", pane: session.pane.id } : null,
     title: firstLine(session.prompt) || "Untitled session",
     prompt: session.prompt,
-    lastMessage: finished ? withoutRepliesLine(lastMessage) : lastMessage,
+    lastMessage: withoutRepliesLine(lastMessage),
     proposals,
     canSuggest: finished && !context.stopped && !proposals.length && !!lastMessage?.trim(),
     updatedAt: session.updatedAt,

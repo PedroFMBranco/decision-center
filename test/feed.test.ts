@@ -69,3 +69,10 @@ test('finished turns get parsed proposals, or can ask for suggestions', () => {
   assert.deepEqual([empty?.proposals, empty?.canSuggest], [[], false])
   assert.deepEqual([question?.proposals, question?.canSuggest], [[], false])
 })
+
+test('a closing Replies: line becomes proposals and never shows in the message', () => {
+  const lastMessage = 'Done.\nReplies: "Open the PR" | "Run the tests"'
+  const [finished, question] = [item(session({ lastMessage })), item(session({ lastMessage, pending: questionAsk(colour, 5) }))]
+  assert.deepEqual([finished?.lastMessage, finished?.proposals, finished?.canSuggest], ['Done.', ['Open the PR', 'Run the tests'], false])
+  assert.deepEqual([question?.kind, question?.lastMessage, question?.proposals], ['question', 'Done.', []])
+})
